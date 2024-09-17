@@ -72,7 +72,7 @@ class Parameters:
         ###################################
 
         # create parser object and read config file
-        fn = f'../config/{config_name}'
+        fn = f"/content/neural_rx/config/{config_name}"
         if exists(fn):
             config = configparser.RawConfigParser()
             # automatically add fileformat if needed
@@ -149,7 +149,7 @@ class Parameters:
                     mcs_index=mcs_index,
                     mcs_table=self.mcs_table,
                     channel_type="PUSCH")
-                    #n_id=self.n_ids[0])
+            # n_id=self.n_ids[0])
 
             # first user PUSCH config
             pc = PUSCHConfig(
@@ -184,7 +184,7 @@ class Parameters:
 
         # for the evaluation, only activate num_tx_eval configs
         if not training:
-                # overwrite num_tx_eval if explicitly provided:
+            # overwrite num_tx_eval if explicitly provided:
             if num_tx_eval is not None:
                 num_tx_eval = num_tx_eval
             else: # if not provided use all available port sets
@@ -256,9 +256,9 @@ class Parameters:
         # Sanity check
         if self.channel_type in ("DoubleTDLlow","DoubleTDLmedium",
                                  "DoubleTDLhigh") and self.max_num_tx==1:
-                print("Warning: SelectedDoubleTDL model only defined for 2 "\
+            print("Warning: SelectedDoubleTDL model only defined for 2 "\
                       "users. Selecting TDL-B100 instead.")
-                self.channel_type = "TDL-B100"
+            self.channel_type = "TDL-B100"
 
         # Initialize channel
         # Remark: new channel models can be added here
@@ -367,7 +367,6 @@ class Parameters:
         elif self.channel_type == "AWGN":
             self.channel = AWGN()
 
-
         elif self.channel_type == "Dataset":
             channel_model = DatasetChannel("../data/" + self.tfrecord_filename,
                                     max_num_examples=-1, # loads entire dataset
@@ -395,7 +394,6 @@ class Parameters:
                                     constant_offset=(not training)) # fix offset for evaluation
         else:
             self.frequency_offset = None
-
 
         ################
         ##### MISC #####
