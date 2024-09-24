@@ -553,6 +553,7 @@ class CGNN(nn.Module):
         self.dtype = dtype
 
         # Initialization for the state
+        print("flag: CGNN")
         if self._var_mcs_masking:
             self._s_init = nn.ModuleList(
                 [StateInit(d_s, num_units_init, layer_type=layer_type_conv)]
