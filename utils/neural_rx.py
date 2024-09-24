@@ -169,7 +169,7 @@ class AggregateUserStates(nn.Module):
         print("flag: AggregateUserStates")
         print(layer_type)
 
-        if layer_type != "dense":
+        if layer_type not in ["dense", "linear"]:
             raise NotImplementedError("Unknown layer_type selected.")
 
         self._hidden_layers = nn.ModuleList()
@@ -375,6 +375,8 @@ class CGNNIt(nn.Module):
         super().__init__()
 
         # Layer for state aggregation
+        print("flag: CGNNIt")
+        print(layer_type_dense)
         self._state_aggreg = AggregateUserStates(
             d_s, num_units_agg, layer_type_dense, dtype=dtype
         )
@@ -559,6 +561,7 @@ class CGNN(nn.Module):
 
         # Initialization for the state
         print("flag: CGNN")
+        print(layer_type_dense)
         if self._var_mcs_masking:
             self._s_init = nn.ModuleList(
                 [StateInit(d_s, num_units_init, layer_type=layer_type_conv)]
