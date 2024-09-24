@@ -317,6 +317,7 @@ class E2E_Model(nn.Module):
             )
 
         if mcs_ue_mask is None:
+            print("flag1")
             # No mcs-to-ue-mask specified --> evaluate pre-specified MCS only
             assert isinstance(
                 mcs_arr_eval_idx, int
@@ -333,6 +334,7 @@ class E2E_Model(nn.Module):
             )
             mcs_arr_eval = [mcs_arr_eval_idx]
         else:
+            print("flag2")
             # mcs_ue_mask is not none --> we now need to process all MCSs
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
                 # some different order specified. This is useful to evaluate
