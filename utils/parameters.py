@@ -219,9 +219,15 @@ class Parameters:
             for pcs in self.pusch_configs:
                 for pc in pcs:
                     pc.carrier.slot_number = slot_num
-                pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
-                self.pilots.append(pilot_pattern.pilots)
-        self.pilots = torch.stack([torch.tensor(pilot) for pilot in self.pilots], dim=0)
+            # only generate pilot pattern for first MCS's PUSCH config, as
+            # pilots are independent from MCS index
+            pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
+            self.pilots.append(pilot_pattern.pilots.numpy())  # Convert to NumPy array
+
+        # Convert the list of NumPy arrays to a PyTorch tensor
+        self.pilots = torch.stack(
+            [torch.from_numpy(pilot) for pilot in self.pilots], dim=0
+        )
 
         # for pcs in self.pusch_configs:
         #     for pc in pcs:
