@@ -13,7 +13,7 @@
 # import tensorflow as tf
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
-from sionna.utils import BinarySource, ebnodb2no, expand_to_rank
+from sionna.utils import BinarySource, ebnodb2no  # , expand_to_rank
 from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 import torch
@@ -376,6 +376,11 @@ class E2E_Model(nn.Module):
             self._set_transmitter_random_pilots()
 
         # Combine transmit signals from all MCSs
+        def expand_to_rank(tensor, target_rank, axis=-1):
+            while tensor.dim() < target_rank:
+                tensor = tensor.unsqueeze(axis)
+            return tensor
+
         _mcs_ue_mask = expand_to_rank(
             torch.gather(
                 mcs_ue_mask,
