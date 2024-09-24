@@ -166,6 +166,8 @@ class AggregateUserStates(nn.Module):
 
     def __init__(self, d_s, num_units, layer_type="dense", dtype=torch.float32):
         super().__init__()
+        print("flag: AggregateUserStates")
+        print(layer_type)
 
         if layer_type != "dense":
             raise NotImplementedError("Unknown layer_type selected.")
