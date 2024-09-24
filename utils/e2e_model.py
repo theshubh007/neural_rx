@@ -414,6 +414,7 @@ class E2E_Model(nn.Module):
         print("flag3")
         a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
         x = torch.mul(x, a_tx.to(torch.complex64))
+        print("flag4")
 
         ###################################
         # Channel
@@ -550,7 +551,9 @@ class E2E_Model(nn.Module):
                 h_hat_output_shape = torch.cat(
                     [[batch_size, num_tx], h_hat_refined.shape[2:]], dim=0
                 )
+                print("flag5")
                 a_mask = expand_to_rank(active_dmrs, h_hat_refined.dim(), axis=-1)
+                print("flag6")
                 a_mask = a_mask.expand(h_hat_refined.shape)
                 if h_hat is not None:
                     h_hat = h_hat[a_mask]
