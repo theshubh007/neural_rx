@@ -152,6 +152,7 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
+        print("flag1")
 
         if self._sys_parameters.system == "baseline_perf_csi_kbest":
             self._sys_name = "Baseline - Perf. CSI & K-Best"
@@ -162,6 +163,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "baseline_perf_csi_lmmse":
+            print("flag2")
             self._sys_name = "Baseline - Perf. CSI & LMMSE"
             self._receiver = BaselineReceiver(
                 self._sys_parameters,
@@ -170,6 +172,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "baseline_lmmse_kbest":
+            print("flag3")
             self._sys_name = "Baseline - LMMSE+K-Best"
             self._receiver = BaselineReceiver(
                 self._sys_parameters,
@@ -178,6 +181,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "baseline_lmmse_lmmse":
+            print("flag4")
             self._sys_name = "Baseline - LMMSE+LMMSE"
             self._receiver = BaselineReceiver(
                 self._sys_parameters,
