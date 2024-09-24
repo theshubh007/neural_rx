@@ -286,7 +286,7 @@ class E2E_Model(nn.Module):
         for mcs_list_idx in range(len(self._sys_parameters.mcs_index)):
             self._transmitters[mcs_list_idx].pilot_pattern.pilots = pilots
 
-    def call(
+    def forward(
         self,
         batch_size,
         ebno_db,
