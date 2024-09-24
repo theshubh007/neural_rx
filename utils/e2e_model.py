@@ -21,8 +21,8 @@ import torch.nn as nn
 
 
 # Combine transmit signals from all MCSs
-def expand_to_rank(tensor, rank, axis=-1):
-    while tensor.dim() < rank:
+def expand_to_rank(tensor, target_rank, axis=-1):
+    while tensor.dim() < target_rank:
         tensor = tensor.unsqueeze(axis)
     return tensor
 
@@ -382,36 +382,38 @@ class E2E_Model(nn.Module):
         if self._training:
             self._set_transmitter_random_pilots()
 
+        print("flag2.1")
         _mcs_ue_mask = expand_to_rank(
             torch.gather(
                 mcs_ue_mask,
                 dim=2,
-                index=torch.tensor([mcs_arr_eval[0]]).expand(
-                    batch_size, self._sys_parameters.max_num_tx, -1
-                ),
+                index=torch.tensor(
+                    [mcs_arr_eval[idx]], device=mcs_ue_mask.device
+                ).expand(batch_size, self._sys_parameters.max_num_tx, -1),
             ),
-            rank=5,
+            target_rank=5,
             axis=-1,
         ).to(torch.complex64)
+        print("flag2.2")
         x = _mcs_ue_mask * self._transmitters[mcs_arr_eval[0]](b[0])
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
                 torch.gather(
                     mcs_ue_mask,
                     dim=2,
-                    index=torch.tensor([mcs_arr_eval[idx]]).expand(
-                        batch_size, self._sys_parameters.max_num_tx, -1
-                    ),
+                    index=torch.tensor(
+                        [mcs_arr_eval[idx]], device=mcs_ue_mask.device
+                    ).expand(batch_size, self._sys_parameters.max_num_tx, -1),
                 ),
-                rank=5,
+                target_rank=5,
                 axis=-1,
             ).to(torch.complex64)
             x = x + _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
         # mask non-active DMRS ports by multiplying with 0
+        print("flag3")
         a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
         x = torch.mul(x, a_tx.to(torch.complex64))
-        print("flag3")
 
         ###################################
         # Channel
