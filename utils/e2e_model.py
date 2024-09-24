@@ -247,6 +247,7 @@ class E2E_Model(nn.Module):
         r = r.repeat(batch_size, 1)
         # Create mask for active DMRS ports
         x = torch.where(r < num_tx, torch.ones_like(r), torch.zeros_like(r))
+        print(type(x))
 
         # Shuffle the mask along each row (batch dimension)
         x_p = torch.stack([x[i, torch.randperm(max_num_tx)] for i in range(batch_size)])
@@ -396,6 +397,7 @@ class E2E_Model(nn.Module):
         ).to(torch.complex64)
         print("flag2.2")
         x = _mcs_ue_mask * self._transmitters[mcs_arr_eval[0]](b[0])
+        print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
                 torch.gather(
@@ -409,6 +411,7 @@ class E2E_Model(nn.Module):
                 axis=-1,
             ).to(torch.complex64)
             x = x + _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
+            print(type(x))
 
         # mask non-active DMRS ports by multiplying with 0
         print("flag3")
@@ -417,6 +420,7 @@ class E2E_Model(nn.Module):
         a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
 
         x = torch.mul(x, a_tx.to(torch.complex64))
+        print(type(x))
         print("flag4")
 
         ###################################
