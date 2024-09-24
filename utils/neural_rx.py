@@ -270,7 +270,8 @@ class UpdateState(nn.Module):
 
     def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
         super().__init__()
-
+        print("flag: UpdateState")
+        print(layer_type)
         if layer_type == "sepconv":
             layer = lambda in_c, out_c: nn.Sequential(
                 nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
