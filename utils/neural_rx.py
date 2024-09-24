@@ -487,7 +487,9 @@ class ReadoutChEst(nn.Module):
         Channel estimate for each stream.
     """
 
-    def __init__(self, num_rx_ant, num_units, layer_type="dense", dtype=torch.float32):
+    def __init__(
+        self, num_rx_ant, num_units, layer_type="sepconv", dtype=torch.float32
+    ):
         super().__init__()
 
         if layer_type != "dense":
