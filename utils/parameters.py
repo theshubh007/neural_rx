@@ -13,7 +13,10 @@
 
 import numpy as np
 import configparser
-import tensorflow as tf
+
+import torch
+
+# import tensorflow as tf
 from os.path import exists
 from sionna.nr import (
     PUSCHConfig,
@@ -91,9 +94,7 @@ class Parameters:
         # create parser object and read config file
         fn = f"{config_name}"
         if exists(fn):
-            print("flag1")
             config = configparser.RawConfigParser()
-            print("flag2")
             # automatically add fileformat if needed
             config_name.replace(".cfg", "") + ".cfg"
             print(f"Loading config file: {fn}")
@@ -235,8 +236,8 @@ class Parameters:
             # pilots are independent from MCS index
             pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
             self.pilots.append(pilot_pattern.pilots)
-        self.pilots = tf.stack(self.pilots, axis=0)
-        self.pilots = tf.constant(self.pilots)
+        self.pilots = torch.stack(self.pilots, dim=0)
+        self.pilots = torch.tensor(self.pilots)
         for pcs in self.pusch_configs:
             for pc in pcs:
                 pc.carrier.slot_number = self.slot_number
@@ -484,12 +485,15 @@ class Parameters:
                     "Please run compute_cov_mat.py for given config first."
                 )
 
-            self.space_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_space_cov_mat.npy"), tf.complex64
+            self.space_cov_mat = torch.tensor(
+                np.load(f"../weights/{self.label}_space_cov_mat.npy"),
+                dtype=torch.complex64,
             )
-            self.time_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_time_cov_mat.npy"), tf.complex64
+            self.time_cov_mat = torch.tensor(
+                np.load(f"../weights/{self.label}_time_cov_mat.npy"),
+                dtype=torch.complex64,
             )
-            self.freq_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_freq_cov_mat.npy"), tf.complex64
+            self.freq_cov_mat = torch.tensor(
+                np.load(f"../weights/{self.label}_freq_cov_mat.npy"),
+                dtype=torch.complex64,
             )
