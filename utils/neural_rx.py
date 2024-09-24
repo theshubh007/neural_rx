@@ -755,9 +755,13 @@ class CGNNOFDM(nn.Module):
             self._mse = nn.MSELoss(reduction="none")
 
         # Pre-compute positional encoding
-        rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
+        rg_type = torch.from_numpy(self._rg.build_type_grid().numpy())[
+            :, 0
+        ]  # One stream only
         pilot_ind = torch.where(rg_type == 1)
-        pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3)
+        pilots = flatten_last_dims(
+            torch.from_numpy(self._rg.pilot_pattern.pilots.numpy()), 3
+        )
         pilots_only = torch.zeros_like(rg_type, dtype=torch.complex64)
         pilots_only[pilot_ind] = pilots
 
@@ -839,7 +843,7 @@ class CGNNOFDM(nn.Module):
         num_tx = active_tx.shape[1]
 
         if self._sys_parameters.mask_pilots:
-            rg_type = self._rg.build_type_grid()
+            rg_type = torch.from_numpy(self._rg.build_type_grid().numpy())
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
             y = torch.where(
                 rg_type == 1, torch.tensor(0.0, dtype=y.dtype, device=y.device), y
