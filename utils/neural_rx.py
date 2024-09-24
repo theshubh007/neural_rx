@@ -688,8 +688,6 @@ class CGNN(nn.Module):
         return llrs, h_hats
 
 
-
-
 ##########################3
 ############################3
 ##############################
@@ -697,6 +695,7 @@ class CGNN(nn.Module):
 #################################
 ###################################
 ############################
+
 
 class CGNNOFDM(Model):
     # pylint: disable=line-too-long
@@ -814,22 +813,24 @@ class CGNNOFDM(Model):
 
     """
 
-    def __init__(self,
-                 sys_parameters,
-                 max_num_tx,
-                 training,
-                 num_it=5,
-                 d_s=32,
-                 num_units_init=[64],
-                 num_units_agg=[[64]],
-                 num_units_state=[[64]],
-                 num_units_readout=[64],
-                 layer_demappers=None,
-                 layer_type_dense="dense",
-                 layer_type_conv="sepconv",
-                 layer_type_readout="dense",
-                 nrx_dtype=tf.float32,
-                 **kwargs):
+    def __init__(
+        self,
+        sys_parameters,
+        max_num_tx,
+        training,
+        num_it=5,
+        d_s=32,
+        num_units_init=[64],
+        num_units_agg=[[64]],
+        num_units_state=[[64]],
+        num_units_readout=[64],
+        layer_demappers=None,
+        layer_type_dense="dense",
+        layer_type_conv="sepconv",
+        layer_type_readout="dense",
+        nrx_dtype=tf.float32,
+        **kwargs
+    ):
         super().__init__(**kwargs)
 
         self._training = training
@@ -846,7 +847,7 @@ class CGNNOFDM(Model):
             print("Masking pilots for pilotless communications.")
 
         self._mcs_var_mcs_masking = False
-        if hasattr(self._sys_parameters, 'mcs_var_mcs_masking'):
+        if hasattr(self._sys_parameters, "mcs_var_mcs_masking"):
             self._mcs_var_mcs_masking = self._sys_parameters.mcs_var_mcs_masking
             print("Var-MCS NRX with masking.")
         elif len(sys_parameters.mcs_index) > 1:
@@ -858,8 +859,9 @@ class CGNNOFDM(Model):
         # all UEs in the same pusch config must use the same MCS
         num_bits_per_symbol = []
         for mcs_list_idx in range(self._num_mcss_supported):
-             num_bits_per_symbol.append(
-                        sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol)
+            num_bits_per_symbol.append(
+                sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol
+            )
 
         # Number of receive antennas
         num_rx_ant = sys_parameters.num_rx_antennas
@@ -867,28 +869,29 @@ class CGNNOFDM(Model):
         ####################################################
         # Core neural receiver
         ####################################################
-        self._cgnn = CGNN(num_bits_per_symbol,  # is a list
-                          num_rx_ant,
-                          num_it,
-                          d_s,
-                          num_units_init,
-                          num_units_agg,
-                          num_units_state,
-                          num_units_readout,
-                          training=training,
-                          layer_type_dense=layer_type_dense,
-                          layer_type_conv=layer_type_conv,
-                          layer_type_readout=layer_type_readout,
-                          var_mcs_masking=self._mcs_var_mcs_masking,
-                          dtype=nrx_dtype)
+        self._cgnn = CGNN(
+            num_bits_per_symbol,  # is a list
+            num_rx_ant,
+            num_it,
+            d_s,
+            num_units_init,
+            num_units_agg,
+            num_units_state,
+            num_units_readout,
+            training=training,
+            layer_type_dense=layer_type_dense,
+            layer_type_conv=layer_type_conv,
+            layer_type_readout=layer_type_readout,
+            var_mcs_masking=self._mcs_var_mcs_masking,
+            dtype=nrx_dtype,
+        )
 
         ###################################################
         # Resource grid demapper to extract the
         # data-carrying resource elements from the
         # resource grid
         ###################################################
-        self._rg_demapper = ResourceGridDemapper(self._rg,
-                                                 sys_parameters.sm)
+        self._rg_demapper = ResourceGridDemapper(self._rg, sys_parameters.sm)
 
         #################################################
         # Instantiate the loss function if training
@@ -896,11 +899,12 @@ class CGNNOFDM(Model):
         if training:
             # Loss function
             self._bce = tf.keras.losses.BinaryCrossentropy(
-                    from_logits=True,
-                    reduction=tf.keras.losses.Reduction.NONE)
+                from_logits=True, reduction=tf.keras.losses.Reduction.NONE
+            )
             # Loss function
             self._mse = tf.keras.losses.MeanSquaredError(
-                reduction=tf.keras.losses.Reduction.NONE)
+                reduction=tf.keras.losses.Reduction.NONE
+            )
 
         ###############################################
         # Pre-compute positional encoding.
@@ -910,19 +914,18 @@ class CGNNOFDM(Model):
         ##############################################
 
         # Indices of the pilot-carrying resource elements and pilot symbols
-        rg_type = self._rg.build_type_grid()[:,0] # One stream only
-        pilot_ind = tf.where(rg_type==1)
+        rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
+        pilot_ind = tf.where(rg_type == 1)
         pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3)
         # Resource grid carrying only the pilots
         # [max_num_tx, num_effective_subcarriers, num_ofdm_symbols]
-        pilots_only = tf.scatter_nd(pilot_ind, pilots,
-                                    rg_type.shape)
+        pilots_only = tf.scatter_nd(pilot_ind, pilots, rg_type.shape)
         # Indices of pilots carrying RE (transmitter, freq, time)
         pilot_ind = tf.where(tf.abs(pilots_only) > 1e-3)
         pilot_ind = np.array(pilot_ind)
 
         # Sort the pilots according to which to which TX they are allocated
-        pilot_ind_sorted = [ [] for _ in range(max_num_tx) ]
+        pilot_ind_sorted = [[] for _ in range(max_num_tx)]
 
         for p_ind in pilot_ind:
             tx_ind = p_ind[0]
@@ -932,16 +935,24 @@ class CGNNOFDM(Model):
 
         # Distance to the nearest pilot in time
         # Initialized with zeros and then filled.
-        pilots_dist_time = np.zeros([   max_num_tx,
-                                        self._rg.num_ofdm_symbols,
-                                        self._rg.fft_size,
-                                        pilot_ind_sorted.shape[1]])
+        pilots_dist_time = np.zeros(
+            [
+                max_num_tx,
+                self._rg.num_ofdm_symbols,
+                self._rg.fft_size,
+                pilot_ind_sorted.shape[1],
+            ]
+        )
         # Distance to the nearest pilot in frequency
         # Initialized with zeros and then filled
-        pilots_dist_freq = np.zeros([   max_num_tx,
-                                        self._rg.num_ofdm_symbols,
-                                        self._rg.fft_size,
-                                        pilot_ind_sorted.shape[1]])
+        pilots_dist_freq = np.zeros(
+            [
+                max_num_tx,
+                self._rg.num_ofdm_symbols,
+                self._rg.fft_size,
+                pilot_ind_sorted.shape[1],
+            ]
+        )
 
         t_ind = np.arange(self._rg.num_ofdm_symbols)
         f_ind = np.arange(self._rg.fft_size)
@@ -959,28 +970,29 @@ class CGNNOFDM(Model):
         # unit variance.
         nearest_pilot_dist_time = np.min(pilots_dist_time, axis=-1)
         nearest_pilot_dist_freq = np.min(pilots_dist_freq, axis=-1)
-        nearest_pilot_dist_time -= np.mean(nearest_pilot_dist_time,
-                                            axis=1, keepdims=True)
+        nearest_pilot_dist_time -= np.mean(
+            nearest_pilot_dist_time, axis=1, keepdims=True
+        )
         std_ = np.std(nearest_pilot_dist_time, axis=1, keepdims=True)
-        nearest_pilot_dist_time = np.where(std_ > 0.,
-                                           nearest_pilot_dist_time / std_,
-                                           nearest_pilot_dist_time)
-        nearest_pilot_dist_freq -= np.mean(nearest_pilot_dist_freq,
-                                            axis=2, keepdims=True)
+        nearest_pilot_dist_time = np.where(
+            std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
+        )
+        nearest_pilot_dist_freq -= np.mean(
+            nearest_pilot_dist_freq, axis=2, keepdims=True
+        )
         std_ = np.std(nearest_pilot_dist_freq, axis=2, keepdims=True)
-        nearest_pilot_dist_freq = np.where(std_ > 0.,
-                                           nearest_pilot_dist_freq / std_,
-                                           nearest_pilot_dist_freq)
+        nearest_pilot_dist_freq = np.where(
+            std_ > 0.0, nearest_pilot_dist_freq / std_, nearest_pilot_dist_freq
+        )
 
         # Stacking the time and frequency distances and casting to TF types.
-        nearest_pilot_dist = np.stack([ nearest_pilot_dist_time,
-                                        nearest_pilot_dist_freq],
-                                        axis=-1)
+        nearest_pilot_dist = np.stack(
+            [nearest_pilot_dist_time, nearest_pilot_dist_freq], axis=-1
+        )
         nearest_pilot_dist = tf.constant(nearest_pilot_dist, tf.float32)
         # Reshaping to match the expected shape.
         # [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        self._nearest_pilot_dist = tf.transpose(nearest_pilot_dist,
-                                                [0, 2, 1, 3])
+        self._nearest_pilot_dist = tf.transpose(nearest_pilot_dist, [0, 2, 1, 3])
 
     @property
     def num_it(self):
@@ -1000,8 +1012,9 @@ class CGNNOFDM(Model):
         else:
             y, h_hat_init, active_tx = inputs
             if mcs_ue_mask_eval is None:
-                mcs_ue_mask = tf.one_hot(mcs_arr_eval[0],
-                                         depth=self._num_mcss_supported)
+                mcs_ue_mask = tf.one_hot(
+                    mcs_arr_eval[0], depth=self._num_mcss_supported
+                )
             else:
                 mcs_ue_mask = mcs_ue_mask_eval
             mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
@@ -1015,7 +1028,7 @@ class CGNNOFDM(Model):
             # add batch dim
             rg_type = tf.expand_dims(rg_type, axis=0)
             rg_type = tf.broadcast_to(rg_type, tf.shape(y))
-            y = tf.where(rg_type==1, tf.constant(0., y.dtype), y)
+            y = tf.where(rg_type == 1, tf.constant(0.0, y.dtype), y)
 
         ##############################################
         # Core Neural Receiver
@@ -1023,7 +1036,7 @@ class CGNNOFDM(Model):
 
         # Reshaping to the expected shape
         # [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-        y = y[:,0]
+        y = y[:, 0]
         y = tf.transpose(y, [0, 3, 2, 1])
         y = tf.concat([tf.math.real(y), tf.math.imag(y)], axis=-1)
         # Map showing the position of the nearest pilot for every user in time
@@ -1083,12 +1096,12 @@ class CGNNOFDM(Model):
                 # users
                 # [batch_size, 1, max_num_tx, num_ofdm_symbols,
                 #   fft_size, num_bits_per_symbol]
-                #llr = tf.pad(llr, [ [0, 0], [0, 0],
+                # llr = tf.pad(llr, [ [0, 0], [0, 0],
                 #                    [0, self._max_num_tx-num_tx],
                 #                    [0,0], [0,0], [0, 0]])
                 # [batch_size, num_tx, 1, num_data_symbols, num_bit_per_symbols]
                 llrs_[idx] = self._rg_demapper(llrs_[idx])
-                llrs_[idx] = llrs_[idx][:,:num_tx]
+                llrs_[idx] = llrs_[idx][:, :num_tx]
 
                 # Keeping only the relevant users and the unique stream per user
                 # [batch_size, num_tx, 1, num_data_symbols*num_bit_per_symbols]
@@ -1123,30 +1136,30 @@ class CGNNOFDM(Model):
 
                     mcs_ue_mask_ = expand_to_rank(
                         tf.gather(mcs_ue_mask, indices=indices[idx], axis=2),
-                        tf.rank(loss_data_), axis=-1)
+                        tf.rank(loss_data_),
+                        axis=-1,
+                    )
 
                     # select data loss only for associated MCSs
                     loss_data_ = tf.multiply(loss_data_, mcs_ue_mask_)
 
-
                     # only focus on active users
-                    active_tx_data = expand_to_rank(active_tx,
-                                                    tf.rank(loss_data_),
-                                                    axis=-1)
+                    active_tx_data = expand_to_rank(
+                        active_tx, tf.rank(loss_data_), axis=-1
+                    )
                     loss_data_ = tf.multiply(loss_data_, active_tx_data)
                     # Average over batch, transmitters, and resource grid
                     loss_data += tf.reduce_mean(loss_data_)
 
             # Loss on channel estimation
             loss_chest = tf.constant(0.0, dtype=tf.float32)
-            if h_hats is not None: # h_hat might not be available
+            if h_hats is not None:  # h_hat might not be available
                 for h_hat_ in h_hats:
                     if h is not None:
                         loss_chest += self._mse(h, h_hat_)
 
             # only focus on active users
-            active_tx_chest = expand_to_rank(active_tx,
-                                             tf.rank(loss_chest), axis=-1)
+            active_tx_chest = expand_to_rank(active_tx, tf.rank(loss_chest), axis=-1)
             loss_chest = tf.multiply(loss_chest, active_tx_chest)
             # Average over batch, transmitters, and resource grid
             loss_chest = tf.reduce_mean(loss_chest)
@@ -1154,6 +1167,53 @@ class CGNNOFDM(Model):
         else:
             # Only return the last iteration during inference
             return llrs[-1][0], h_hats[-1]
+
+
+###########################3
+###########################3
+###########################3
+###########################3
+###########################3
+
+
+class TBEncoderWrapper(nn.Module):
+    def __init__(self, tb_encoder):
+        super().__init__()
+        self.tb_encoder = tb_encoder
+
+    def forward(self, x):
+        return torch.from_numpy(self.tb_encoder(x.cpu().numpy()).numpy())
+
+
+class TBDecoderWrapper(nn.Module):
+    def __init__(self, tb_decoder):
+        super().__init__()
+        self.tb_decoder = tb_decoder
+
+    def forward(self, x):
+        output = self.tb_decoder(x.cpu().numpy())
+        return tuple(torch.from_numpy(t.numpy()) for t in output)
+
+
+class PUSCHLSChannelEstimatorWrapper(nn.Module):
+    def __init__(self, estimator):
+        super().__init__()
+        self.estimator = estimator
+
+    def forward(self, inputs):
+        y, no = inputs
+        output = self.estimator([y.cpu().numpy(), no.cpu().numpy()])
+        return tuple(torch.from_numpy(t.numpy()) for t in output)
+
+
+class LayerDemapperWrapper(nn.Module):
+    def __init__(self, layer_demapper):
+        super().__init__()
+        self.layer_demapper = layer_demapper
+
+    def forward(self, x):
+        return torch.from_numpy(self.layer_demapper(x.cpu().numpy()).numpy())
+
 
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False, **kwargs):
@@ -1169,41 +1229,61 @@ class NeuralPUSCHReceiver(nn.Module):
         self._num_mcss_supported = len(sys_parameters.mcs_index)
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
-                self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder)
+                TBEncoderWrapper(
+                    self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
+                )
+            )
             self._tb_decoders.append(
-                TBDecoder(self._tb_encoders[mcs_list_idx],
-                          num_bp_iter=sys_parameters.num_bp_iter,
-                          cn_type=sys_parameters.cn_type))
+                TBDecoderWrapper(
+                    TBDecoder(
+                        self._tb_encoders[mcs_list_idx].tb_encoder,
+                        num_bp_iter=sys_parameters.num_bp_iter,
+                        cn_type=sys_parameters.cn_type,
+                    )
+                )
+            )
 
         # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
-            self._precoding_mat = sys_parameters.transmitters[0]._precoder._w
+            self._precoding_mat = torch.from_numpy(
+                sys_parameters.transmitters[0]._precoder._w.numpy()
+            )
         else:
-            self._precoding_mat = torch.ones(sys_parameters.max_num_tx,
-                                             sys_parameters.num_antenna_ports, 1, 
-                                             dtype=torch.complex64)
+            self._precoding_mat = torch.ones(
+                sys_parameters.max_num_tx,
+                sys_parameters.num_antenna_ports,
+                1,
+                dtype=torch.complex64,
+            )
 
         # LS channel estimator
         rg = sys_parameters.transmitters[0]._resource_grid
         pc = sys_parameters.pusch_configs[0][0]
-        self._ls_est = PUSCHLSChannelEstimator(
-            resource_grid=rg,
-            dmrs_length=pc.dmrs.length,
-            dmrs_additional_position=pc.dmrs.additional_position,
-            num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
-            interpolation_type="nn")
+        self._ls_est = PUSCHLSChannelEstimatorWrapper(
+            PUSCHLSChannelEstimator(
+                resource_grid=rg,
+                dmrs_length=pc.dmrs.length,
+                dmrs_additional_position=pc.dmrs.additional_position,
+                num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
+                interpolation_type="nn",
+            )
+        )
 
-        rg_type = rg.build_type_grid()[:,0]
-        pilot_ind = torch.where(rg_type==1)
+        rg_type = torch.from_numpy(rg.build_type_grid().numpy())[:, 0]
+        pilot_ind = torch.where(rg_type == 1)
         self._pilot_ind = pilot_ind[0].numpy()
 
         # Layer demappers
         self._layer_demappers = nn.ModuleList()
         for mcs_list_idx in range(self._num_mcss_supported):
             self._layer_demappers.append(
-                LayerDemapper(
-                    self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
-                    sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol))
+                LayerDemapperWrapper(
+                    LayerDemapper(
+                        self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
+                        sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
+                    )
+                )
+            )
 
         self._neural_rx = CGNNOFDM(
             sys_parameters,
@@ -1219,14 +1299,17 @@ class NeuralPUSCHReceiver(nn.Module):
             layer_type_dense=sys_parameters.layer_type_dense,
             layer_type_conv=sys_parameters.layer_type_conv,
             layer_type_readout=sys_parameters.layer_type_readout,
-            dtype=sys_parameters.nrx_dtype)
+            dtype=sys_parameters.nrx_dtype,
+        )
 
     def estimate_channel(self, y, num_tx):
-        if self._sys_parameters.initial_chest == 'ls':
+        if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
-                raise ValueError("Cannot use initial channel estimator if pilots are masked.")
-            h_hat, _ = self._ls_est([y, 1e-1])
-            h_hat = h_hat[:,0,:,:num_tx,0]
+                raise ValueError(
+                    "Cannot use initial channel estimator if pilots are masked."
+                )
+            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
+            h_hat = h_hat[:, 0, :, :num_tx, 0]
             h_hat = h_hat.permute(0, 2, 4, 3, 1)
             h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
         elif self._sys_parameters.initial_chest is None:
@@ -1244,33 +1327,33 @@ class NeuralPUSCHReceiver(nn.Module):
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
-            if len(mcs_arr_eval)==1 and not isinstance(b, list):
+            if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]
             bits = []
             for idx in range(len(mcs_arr_eval)):
-                bits.append(
-                    self._sys_parameters.transmitters[mcs_arr_eval[idx]]._tb_encoder(b[idx]))
-            
+                bits.append(self._tb_encoders[mcs_arr_eval[idx]](b[idx]))
+
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
-            
+
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
-            
-            losses = self._neural_rx((y, h_hat, active_tx,
-                                      bits, h, mcs_ue_mask),
-                                     mcs_arr_eval)
+
+            losses = self._neural_rx(
+                (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
+            )
             return losses
         else:
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
-            
+
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
-                mcs_ue_mask_eval=mcs_ue_mask_eval)
-            
+                mcs_ue_mask_eval=mcs_ue_mask_eval,
+            )
+
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
@@ -1281,6 +1364,7 @@ class NeuralPUSCHReceiver(nn.Module):
 # The following layers provide an adapter to the Aerial PUSCH pipeline
 # the code is only relevant for for ONNX/TensorRT exports but can be ignored
 # for Sionna-based simulations.
+
 
 class NRPreprocessing(Layer):
     # pylint: disable=line-too-long
@@ -1332,14 +1416,12 @@ class NRPreprocessing(Layer):
         and frequency. This can be seen as a form of positional encoding.
     """
 
-    def __init__(self,
-                 num_tx,
-                 **kwargs):
+    def __init__(self, num_tx, **kwargs):
 
         super().__init__(**kwargs)
 
         self._num_tx = num_tx
-        self._num_res_per_prb = 12 # fixed in 5G
+        self._num_res_per_prb = 12  # fixed in 5G
 
     def _focc_removal(self, h_hat):
         """
@@ -1363,8 +1445,9 @@ class NRPreprocessing(Layer):
         h_hat = tf.reshape(h_hat, new_shape)
 
         # [bs, num_rx_ants, num_tx, num_pilots//2, 1]
-        h_hat = tf.reduce_sum(h_hat, axis=-1, keepdims=True) \
-                                    / tf.cast(2., dtype=h_hat.dtype)
+        h_hat = tf.reduce_sum(h_hat, axis=-1, keepdims=True) / tf.cast(
+            2.0, dtype=h_hat.dtype
+        )
         # [bs, num_rx_ants, num_tx, num_pilots//2, 2]
 
         # we split into 2 as 4 was only required if we feed the zeroed/masked
@@ -1380,8 +1463,9 @@ class NRPreprocessing(Layer):
 
         return h_ls
 
-    def _calculate_nn_indices(self, dmrs_ofdm_pos, dmrs_subcarrier_pos,
-                              num_ofdm_symbols, num_prbs):
+    def _calculate_nn_indices(
+        self, dmrs_ofdm_pos, dmrs_subcarrier_pos, num_ofdm_symbols, num_prbs
+    ):
         """
         Calculates nearest neighbor interpolation indices for a single PRB.
 
@@ -1411,24 +1495,24 @@ class NRPreprocessing(Layer):
             and frequency. This can be seen as a form of positional encoding.
         """
 
-        re_pos = tf.meshgrid(tf.range(self._num_res_per_prb),
-                             tf.range(num_ofdm_symbols))
+        re_pos = tf.meshgrid(
+            tf.range(self._num_res_per_prb), tf.range(num_ofdm_symbols)
+        )
         re_pos = tf.stack(re_pos, axis=-1)
         # enable broadcasting for distance calculation
-        re_pos = tf.reshape(re_pos, (-1,1,2))
+        re_pos = tf.reshape(re_pos, (-1, 1, 2))
 
         pes = []
         nn_idxs = []
         # calculate distance per tx
         for tx_idx in range(self._num_tx):
             # Combining the coordinates into a single matrix
-            p_idx= tf.meshgrid(dmrs_subcarrier_pos[tx_idx],
-                               dmrs_ofdm_pos[tx_idx])
+            p_idx = tf.meshgrid(dmrs_subcarrier_pos[tx_idx], dmrs_ofdm_pos[tx_idx])
             pilot_pos = tf.stack(p_idx, axis=-1)
             # Reshaping to get a list of coordinate pairs
             pilot_pos = tf.reshape(pilot_pos, (-1, 2))
 
-            pilot_pos = tf.reshape(pilot_pos, (1,-1,2))
+            pilot_pos = tf.reshape(pilot_pos, (1, -1, 2))
             diff = tf.abs(re_pos - pilot_pos)
             # Manhattan distance
             dist = tf.reduce_sum(diff, axis=-1)
@@ -1438,14 +1522,12 @@ class NRPreprocessing(Layer):
 
             # and bring into shape [num_tx, num_streams_per_tx,...
             # ... num_ofdm_symbols,num_effective_subcarriers]
-            nn_idx = tf.reshape(nn_idx,
-                                (1, 1, num_ofdm_symbols, self._num_res_per_prb))
+            nn_idx = tf.reshape(nn_idx, (1, 1, num_ofdm_symbols, self._num_res_per_prb))
 
             # [num_tx, num_subcarriers, num_ofdm_symbols, 2],
             pe = tf.reduce_min(diff, axis=1)
-            pe = tf.reshape(pe,
-                            (1, num_ofdm_symbols, self._num_res_per_prb, 2))
-            pe = tf.transpose(pe, (0,2,1,3))
+            pe = tf.reshape(pe, (1, num_ofdm_symbols, self._num_res_per_prb, 2))
+            pe = tf.transpose(pe, (0, 2, 1, 3))
 
             # normalize per axis(t and f)
             # remark leads to effect that in f dim, we have +/-1
@@ -1453,32 +1535,33 @@ class NRPreprocessing(Layer):
             pe = tf.cast(pe, tf.float32)
 
             # ofdm symbol axis
-            pe_ = pe[...,1:2]
-            pe_ -= tf.reduce_mean(pe_)#,axis=2, keepdims=True)
-            std_ = tf.math.reduce_std(pe_)#,axis=2, keepdims=True)
-            pe_ = tf.where(std_>0., pe_/std_, pe_)
+            pe_ = pe[..., 1:2]
+            pe_ -= tf.reduce_mean(pe_)  # ,axis=2, keepdims=True)
+            std_ = tf.math.reduce_std(pe_)  # ,axis=2, keepdims=True)
+            pe_ = tf.where(std_ > 0.0, pe_ / std_, pe_)
             p.append(pe_)
 
             # subcarrier axis
-            pe_ = pe[...,0:1]
-            pe_ -= tf.reduce_mean(pe_)#,axis=1, keepdims=True)
-            std_ = tf.math.reduce_std(pe_)#,axis=1, keepdims=True)
-            pe_ = tf.where(std_>0., pe_/std_, pe_)
+            pe_ = pe[..., 0:1]
+            pe_ -= tf.reduce_mean(pe_)  # ,axis=1, keepdims=True)
+            std_ = tf.math.reduce_std(pe_)  # ,axis=1, keepdims=True)
+            pe_ = tf.where(std_ > 0.0, pe_ / std_, pe_)
             p.append(pe_)
 
-            pe = tf.concat(p ,axis=-1)
+            pe = tf.concat(p, axis=-1)
 
             pes.append(pe)
             nn_idxs.append(nn_idx)
 
         pe = tf.concat(pes, axis=0)
-        pe = tf.tile(pe, (1, num_prbs, 1, 1)) # broadcasting over all PRBs
+        pe = tf.tile(pe, (1, num_prbs, 1, 1))  # broadcasting over all PRBs
         nn_idx = tf.concat(nn_idxs, axis=0)
         nn_idx = tf.concat(nn_idxs, axis=0)
         return nn_idx, pe
 
-    def _nn_interpolation(self, h_hat, num_ofdm_symbols,dmrs_ofdm_pos,
-                          dmrs_subcarrier_pos):
+    def _nn_interpolation(
+        self, h_hat, num_ofdm_symbols, dmrs_ofdm_pos, dmrs_subcarrier_pos
+    ):
         """
         Applies nearest neighbor interpolation of pilots to all data
         symbols in the resource grid.
@@ -1511,46 +1594,52 @@ class NRPreprocessing(Layer):
         """
         # derive shapes from h_hat (and not y) as TRT has issues otherwise with
         # dynamic input shapes
-        num_pilots_per_dmrs = tf.shape(dmrs_subcarrier_pos)[1] # pilot symbols
-        num_prbs = tf.cast(tf.shape(h_hat)[-1]
-                        / (num_pilots_per_dmrs * tf.shape(dmrs_ofdm_pos)[-1]),
-                           tf.int32)
+        num_pilots_per_dmrs = tf.shape(dmrs_subcarrier_pos)[1]  # pilot symbols
+        num_prbs = tf.cast(
+            tf.shape(h_hat)[-1] / (num_pilots_per_dmrs * tf.shape(dmrs_ofdm_pos)[-1]),
+            tf.int32,
+        )
 
         # permute input estimates such that the first half of pilots of the
         # first PRB follows its second half (or third if multiple dmrs symbols)
         s = tf.shape(h_hat)
         h_hat = split_dim(h_hat, shape=(-1, num_pilots_per_dmrs), axis=3)
         h_hat = split_dim(h_hat, shape=(-1, num_prbs), axis=3)
-        h_hat = tf.transpose(h_hat, (0,1,2,4,3,5))
+        h_hat = tf.transpose(h_hat, (0, 1, 2, 4, 3, 5))
         # flatten dims does not work with ONNX (partially unknown shapes)
         # h_hat = flatten_dims(h_hat, 3, axis=3)
         h_hat = tf.reshape(h_hat, s)
 
         # bring into Sionna compatible shape
-        h_hat = tf.expand_dims(h_hat, axis=1) # num_rx
-        h_hat = tf.expand_dims(h_hat, axis=4) # num_streams_per_tx
+        h_hat = tf.expand_dims(h_hat, axis=1)  # num_rx
+        h_hat = tf.expand_dims(h_hat, axis=4)  # num_streams_per_tx
         perm = tf.roll(tf.range(tf.rank(h_hat)), -3, 0)
         h_hat = tf.transpose(h_hat, perm)
 
         # compute indices on the fly
-        ls_nn_ind, pe = self._calculate_nn_indices(dmrs_ofdm_pos,
-                                                   dmrs_subcarrier_pos,
-                                                   num_ofdm_symbols,
-                                                   num_prbs)
+        ls_nn_ind, pe = self._calculate_nn_indices(
+            dmrs_ofdm_pos, dmrs_subcarrier_pos, num_ofdm_symbols, num_prbs
+        )
 
         # reshape such that interpolation is applied to each PRB individually
         s = tf.shape(h_hat)
         h_hat_prb = split_dim(h_hat, shape=(num_prbs, -1), axis=2)
-        h_hat_prb = tf.transpose(h_hat_prb, (0,1,3,2,4,5,6))
+        h_hat_prb = tf.transpose(h_hat_prb, (0, 1, 3, 2, 4, 5, 6))
         # apply nn interpolation
         outputs = tf.gather(h_hat_prb, ls_nn_ind, 2, batch_dims=2)
-        outputs = tf.transpose(outputs, (0,1,2,4,3,5,6,7))
+        outputs = tf.transpose(outputs, (0, 1, 2, 4, 3, 5, 6, 7))
 
         # and remove artificial "per-prb" dimension
         s = tf.shape(outputs)
-        s = tf.concat((tf.constant((-1,), tf.int32), s[1:3],
-                       tf.expand_dims(num_prbs*self._num_res_per_prb, axis=0),
-                       s[5:]), axis=0)
+        s = tf.concat(
+            (
+                tf.constant((-1,), tf.int32),
+                s[1:3],
+                tf.expand_dims(num_prbs * self._num_res_per_prb, axis=0),
+                s[5:],
+            ),
+            axis=0,
+        )
         # and combine all PRBs
         outputs = tf.reshape(outputs, s)
 
@@ -1570,7 +1659,7 @@ class NRPreprocessing(Layer):
         # shape y [bs, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
         # shape h_hat_ls [bs, num_pilots, num_layers, 2*num_rx_ants]
         # desired shape of h_hat_ls [bs, 2*num_rx_ants, num_layers, num_pilots]
-        h_hat_ls = tf.transpose(h_hat_ls, (0,3,2,1))
+        h_hat_ls = tf.transpose(h_hat_ls, (0, 3, 2, 1))
 
         ######################
         ### FOCC removal
@@ -1582,17 +1671,17 @@ class NRPreprocessing(Layer):
         ### NN interpolator
         ######################
         # Interpolate channel estimates over the RG
-        h_hat, pe = self._nn_interpolation(h_hat_ls,
-                                           num_ofdm_symbols,
-                                           dmrs_ofdm_pos,
-                                           dmrs_subcarrier_pos)
+        h_hat, pe = self._nn_interpolation(
+            h_hat_ls, num_ofdm_symbols, dmrs_ofdm_pos, dmrs_subcarrier_pos
+        )
 
         # Reshaping to the expected shape
         # [batch_size, num_tx, num_effective_subcarriers,
         #       num_ofdm_symbols, 2*num_rx_ant]
-        h_hat = h_hat[:,0,:,:self._num_tx,0]
+        h_hat = h_hat[:, 0, :, : self._num_tx, 0]
         h_hat = tf.transpose(h_hat, [0, 2, 4, 3, 1])
         return [h_hat, pe]
+
 
 class NeuralReceiverONNX(Model):
     # pylint: disable=line-too-long
@@ -1673,43 +1762,47 @@ class NeuralReceiverONNX(Model):
         Refined channel estimates.
     """
 
-    def __init__(self,
-                 num_it,
-                 d_s,
-                 num_units_init,
-                 num_units_agg,
-                 num_units_state ,
-                 num_units_readout,
-                 num_bits_per_symbol,
-                 layer_type_dense,
-                 layer_type_conv,
-                 layer_type_readout,
-                 nrx_dtype,
-                 num_tx,
-                 num_rx_ant,
-                 **kwargs):
+    def __init__(
+        self,
+        num_it,
+        d_s,
+        num_units_init,
+        num_units_agg,
+        num_units_state,
+        num_units_readout,
+        num_bits_per_symbol,
+        layer_type_dense,
+        layer_type_conv,
+        layer_type_readout,
+        nrx_dtype,
+        num_tx,
+        num_rx_ant,
+        **kwargs
+    ):
 
         super().__init__(**kwargs)
         assert len(num_units_agg) == num_it and len(num_units_state) == num_it
 
         # hard-coded for simplicity
-        self._num_tx = num_tx # we assume 1 stream per user
+        self._num_tx = num_tx  # we assume 1 stream per user
 
         ####################################################
         # Detector
         ####################################################
-        self._cgnn = CGNN([num_bits_per_symbol], # no support for mixed MCS
-                          num_rx_ant,
-                          num_it,
-                          d_s,
-                          num_units_init,
-                          num_units_agg,
-                          num_units_state,
-                          num_units_readout,
-                          layer_type_dense=layer_type_dense,
-                          layer_type_conv=layer_type_conv,
-                          layer_type_readout=layer_type_readout,
-                          dtype=nrx_dtype)
+        self._cgnn = CGNN(
+            [num_bits_per_symbol],  # no support for mixed MCS
+            num_rx_ant,
+            num_it,
+            d_s,
+            num_units_init,
+            num_units_agg,
+            num_units_state,
+            num_units_readout,
+            layer_type_dense=layer_type_dense,
+            layer_type_conv=layer_type_conv,
+            layer_type_readout=layer_type_readout,
+            dtype=nrx_dtype,
+        )
 
         self._preprocessing = NRPreprocessing(self._num_tx)
 
@@ -1719,33 +1812,40 @@ class NeuralReceiverONNX(Model):
 
     @num_it.setter
     def num_it(self, val):
-        assert (val >= 1) and (val <= len(self._iterations)),\
-            "Invalid number of iterations"
+        assert (val >= 1) and (
+            val <= len(self._iterations)
+        ), "Invalid number of iterations"
         self._num_it = val
 
     def call(self, inputs):
 
-        y_real, y_imag, h_hat_real, h_hat_imag, \
-            dmrs_port_mask, dmrs_ofdm_pos, dmrs_subcarrier_pos = inputs
+        (
+            y_real,
+            y_imag,
+            h_hat_real,
+            h_hat_imag,
+            dmrs_port_mask,
+            dmrs_ofdm_pos,
+            dmrs_subcarrier_pos,
+        ) = inputs
 
         y = tf.concat((y_real, y_imag), axis=-1)
         h_hat_p = tf.concat((h_hat_real, h_hat_imag), axis=-1)
 
         # nearest neighbor interpolation of channel estimates
-        h_hat, pe = self._preprocessing((y,
-                                         h_hat_p,
-                                         dmrs_ofdm_pos,
-                                         dmrs_subcarrier_pos))
+        h_hat, pe = self._preprocessing(
+            (y, h_hat_p, dmrs_ofdm_pos, dmrs_subcarrier_pos)
+        )
 
         # dummy MCS mask (no support for mixed MCS)
-        mcs_ue_mask = tf.ones((1,1,1), tf.float32)
+        mcs_ue_mask = tf.ones((1, 1, 1), tf.float32)
 
         # and run NRX
         llr, h_hat = self._cgnn([y, pe, h_hat, dmrs_port_mask, mcs_ue_mask])
 
         # cgnn returns list of results for each iteration
         # (not needed for inference)
-        llr = llr[-1][0] # take LLRs of first MCS (no support for mixed MCS)
+        llr = llr[-1][0]  # take LLRs of first MCS (no support for mixed MCS)
         h_hat = h_hat[-1]
 
         # cast back to tf.float32 (if NRX uses quantization)
@@ -1753,8 +1853,8 @@ class NeuralReceiverONNX(Model):
         h_hat = tf.cast(h_hat, tf.float32)
 
         # reshape llrs in Aerial format
-        llr = tf.transpose(llr, (0,4,1,2,3))
+        llr = tf.transpose(llr, (0, 4, 1, 2, 3))
         # Sionna defines LLRs with different sign
-        llr = -1. * llr
+        llr = -1.0 * llr
 
         return llr, h_hat

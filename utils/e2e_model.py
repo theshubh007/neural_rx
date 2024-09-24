@@ -152,9 +152,9 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
-        print("flag1")
 
         if self._sys_parameters.system == "baseline_perf_csi_kbest":
+            print("flag1")
             self._sys_name = "Baseline - Perf. CSI & K-Best"
             self._receiver = BaselineReceiver(
                 self._sys_parameters,
