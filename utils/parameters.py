@@ -92,11 +92,11 @@ class Parameters:
         ###################################
 
         # create parser object and read config file
+
         fn = f"{config_name}"
         if exists(fn):
             config = configparser.RawConfigParser()
-            # automatically add fileformat if needed
-            config_name.replace(".cfg", "") + ".cfg"
+            config_name = config_name.replace(".cfg", "") + ".cfg"
             print(f"Loading config file: {fn}")
             config.read(fn)
         else:
@@ -140,40 +140,35 @@ class Parameters:
         #####################################
 
         # init PUSCHConfig
+        # Initialize PUSCH configurations
         carrier_config = CarrierConfig(
             n_cell_id=self.n_cell_id,
             cyclic_prefix=self.cyclic_prefix,
-            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),  # in kHz
+            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),
             n_size_grid=self.n_size_bwp,
             n_start_grid=self.n_start_grid,
             slot_number=self.slot_number,
             frame_number=self.frame_number,
         )
 
-        # init DMRSConfig
         pusch_dmrs_config = PUSCHDMRSConfig(
             config_type=self.dmrs_config_type,
             type_a_position=self.dmrs_type_a_position,
             additional_position=self.dmrs_additional_position,
             length=self.dmrs_length,
-            dmrs_port_set=self.dmrs_port_sets[0],  # first user
+            dmrs_port_set=self.dmrs_port_sets[0],
             n_scid=self.n_scid,
             num_cdm_groups_without_data=self.num_cdm_groups_without_data,
         )
 
         mcs_list = self.mcs_index
-        # generate pusch configs for all MCSs
-        self.pusch_configs = []  # self.pusch_configs[MCS_CONFIG][N_UE]
+        self.pusch_configs = []
         for mcs_list_idx in range(len(mcs_list)):
             self.pusch_configs.append([])
             mcs_index = mcs_list[mcs_list_idx]
-            # init TBConfig
             tb_config = TBConfig(
                 mcs_index=mcs_index, mcs_table=self.mcs_table, channel_type="PUSCH"
             )
-            # n_id=self.n_ids[0])
-
-            # first user PUSCH config
             pc = PUSCHConfig(
                 carrier_config=carrier_config,
                 pusch_dmrs_config=pusch_dmrs_config,
@@ -184,14 +179,9 @@ class Parameters:
                 tpmi=self.tpmi,
                 mapping_type=self.dmrs_mapping_type,
             )
-
-            # clone new PUSCHConfig for each additional user
             for idx, _ in enumerate(self.dmrs_port_sets):
-                p = pc.clone()  # generate new PUSCHConfig
-                # set user specific parts
+                p = pc.clone()
                 p.dmrs.dmrs_port_set = self.dmrs_port_sets[idx]
-                # The following parameters are derived from default.
-                # Comment lines if specific configuration is not required.
                 p.n_id = self.n_ids[idx]
                 p.dmrs.n_id = self.dmrs_nid[idx]
                 p.n_rnti = self.n_rntis[idx]
@@ -201,26 +191,23 @@ class Parameters:
         ##### Consistency checks #####
         ##############################
 
-        # after training we can only reduce the number of iterations
+        # Consistency checks
         assert (
             self.num_nrx_iter_eval <= self.num_nrx_iter
         ), "num_nrx_iter_eval must be smaller or equal num_nrx_iter."
 
-        # for the evaluation, only activate num_tx_eval configs
         if not training:
-            # overwrite num_tx_eval if explicitly provided:
             if num_tx_eval is not None:
                 num_tx_eval = num_tx_eval
-            else:  # if not provided use all available port sets
+            else:
                 num_tx_eval = len(self.dmrs_port_sets)
-            self.max_num_tx = num_tx_eval  # non-varying users for evaluation
-            self.min_num_tx = num_tx_eval  # non-varying users for evaluation
-
-        for mcs_list_idx in range(len(mcs_list)):
-            self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
-                : self.max_num_tx
-            ]
-        print(f"Evaluating the first {self.max_num_tx} port sets.")
+            self.max_num_tx = num_tx_eval
+            self.min_num_tx = num_tx_eval
+            for mcs_list_idx in range(len(mcs_list)):
+                self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
+                    : self.max_num_tx
+                ]
+            print(f"Evaluating the first {self.max_num_tx} port sets.")
 
         ##################################
         ##### Configure Transmitters #####
@@ -232,15 +219,13 @@ class Parameters:
             for pcs in self.pusch_configs:
                 for pc in pcs:
                     pc.carrier.slot_number = slot_num
-            # only generate pilot pattern for first MCS's PUSCH config, as
-            # pilots are independent from MCS index
-            pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
-            self.pilots.append(pilot_pattern.pilots)
-        self.pilots = torch.stack(self.pilots, dim=0)
-        self.pilots = torch.tensor(self.pilots)
-        for pcs in self.pusch_configs:
-            for pc in pcs:
-                pc.carrier.slot_number = self.slot_number
+                pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
+                self.pilots.append(pilot_pattern.pilots)
+        self.pilots = torch.stack([torch.tensor(pilot) for pilot in self.pilots], dim=0)
+
+        # for pcs in self.pusch_configs:
+        #     for pc in pcs:
+        #         pc.carrier.slot_number = self.slot_number
 
         # transmitter is a list of PUSCHTransmitters, one for each MCS
         self.transmitters = []
@@ -476,15 +461,12 @@ class Parameters:
 
         # Load covariance matrices
         if self.system in ("baseline_lmmse_kbest", "baseline_lmmse_lmmse"):
-
-            # test if files exist
             fn = f"../weights/{self.label}_time_cov_mat.npy"
             if not exists(fn):
                 raise FileNotFoundError(
                     "time_cov_mat.npy not found. "
                     "Please run compute_cov_mat.py for given config first."
                 )
-
             self.space_cov_mat = torch.tensor(
                 np.load(f"../weights/{self.label}_space_cov_mat.npy"),
                 dtype=torch.complex64,
