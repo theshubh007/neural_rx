@@ -276,7 +276,7 @@ class BaselineReceiver(nn.Module):
             return_tb_crc_status=self._return_tb_status,
         )
 
-    def call(self, inputs):
+    def forward(self, inputs):
         if self._sys_parameters.system in (
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
