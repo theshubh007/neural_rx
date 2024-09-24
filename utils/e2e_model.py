@@ -412,8 +412,10 @@ class E2E_Model(nn.Module):
 
         # mask non-active DMRS ports by multiplying with 0
         print("flag3")
-        # a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
-        a_tx = active_dmrs.unsqueeze(-1).expand(*x.shape)
+        print(type(x))
+        print(x.shape)
+        a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
+
         x = torch.mul(x, a_tx.to(torch.complex64))
         print("flag4")
 
