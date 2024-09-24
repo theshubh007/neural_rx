@@ -65,7 +65,7 @@ class StateInit(nn.Module):
         super().__init__()
         print("flag: StateInit")
         print(layer_type)
-        if layer_type == "sepconv":
+        if layer_type == "sepconv" or layer_type == "separable_conv2d":
             layer = lambda in_c, out_c: nn.Sequential(
                 nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
                 nn.Conv2d(in_c, out_c, kernel_size=1),
