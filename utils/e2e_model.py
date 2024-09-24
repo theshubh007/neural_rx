@@ -333,8 +333,8 @@ class E2E_Model(nn.Module):
                 batch_size, self._sys_parameters.max_num_tx, 1
             )
             mcs_arr_eval = [mcs_arr_eval_idx]
-        else:
             print("flag2")
+        else:
             # mcs_ue_mask is not none --> we now need to process all MCSs
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
                 # some different order specified. This is useful to evaluate
@@ -401,6 +401,7 @@ class E2E_Model(nn.Module):
         # mask non-active DMRS ports by multiplying with 0
         a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
         x = torch.mul(x, a_tx.to(torch.complex64))
+        print("flag3")
 
         ###################################
         # Channel
@@ -462,7 +463,7 @@ class E2E_Model(nn.Module):
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
             y, h = self._channel([x, no])
-
+        print("flag4")
         ###################################
         # Receiver
         ###################################
