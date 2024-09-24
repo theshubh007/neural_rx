@@ -17,7 +17,6 @@ from sionna.utils import BinarySource, ebnodb2no, expand_to_rank
 from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
 
 
@@ -322,13 +321,18 @@ class E2E_Model(nn.Module):
             assert isinstance(
                 mcs_arr_eval_idx, int
             ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
-            mcs_ue_mask = F.one_hot(
-                torch.tensor(mcs_arr_eval_idx),
-                num_classes=len(self._sys_parameters.mcs_index),
+
+            mcs_ue_mask = torch.zeros(
+                len(self._sys_parameters.mcs_index), dtype=torch.float32
             )
+            mcs_ue_mask[mcs_arr_eval_idx] = 1.0
+
             mcs_ue_mask = mcs_ue_mask.unsqueeze(0).unsqueeze(0)
 
-            mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+            # Expand dimensions
+            while mcs_ue_mask.dim() < 3:
+                mcs_ue_mask = mcs_ue_mask.unsqueeze(0)
+
             mcs_ue_mask = mcs_ue_mask.repeat(
                 batch_size, self._sys_parameters.max_num_tx, 1
             )
