@@ -11,142 +11,119 @@
 ##### Neural Receiver #####
 
 import tensorflow as tf
-import numpy as np
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
 from tensorflow.nn import relu
+import numpy as np
+import torch
+from torch import nn
 from sionna.utils import flatten_dims, split_dim, flatten_last_dims, insert_dims, expand_to_rank
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
-class StateInit(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class StateInit(nn.Module):
+    """
     Network initializing the state tensor for each user.
 
-    The network consist of len(num_units) hidden blocks, each block
-    consisting of
+    The network consists of len(num_units) hidden blocks, each block
+    consisting of:
     - A Separable conv layer (including a pointwise convolution)
     - A ReLU activation
 
     The last block is the output block and has the same architecture, but
-    with `d_s` units and no non-linearity
+    with `d_s` units and no non-linearity.
 
     Parameters
     -----------
     d_s : int
         Size of the state vector
-
     num_units : list of int
         Number of kernels for the hidden layers of the MLP.
-
     layer_type: str | "sepconv" | "conv"
         Defines which Convolutional layers are used. Will be either
-        SeparableConv2D or Conv2D.
+        SeparableConv2d or Conv2d.
 
     Input
     ------
     (y, pe, h_hat)
     Tuple:
-
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], tf.float
+    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], torch.Tensor
         The received OFDM resource grid after cyclic prefix removal and FFT.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
         Map showing the position of the nearest pilot for every user in time
-        and frequency.
-        This can be seen as a form of positional encoding.
-
+        and frequency. This can be seen as a form of positional encoding.
     h_hat : None or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                     2*num_rx_ant], tf.float
+                     2*num_rx_ant], torch.Tensor
         Initial channel estimate. If `None`, `h_hat` will be ignored.
 
     Output
     -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Initial state tensor for each user.
     """
 
-    def __init__(   self,
-                    d_s,
-                    num_units,
-                    layer_type="sepconv",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        # one could add custom layers here
-        if layer_type=="sepconv":
-            layer = SeparableConv2D
-        elif layer_type=="conv":
-            layer = Conv2D
+        if layer_type == "sepconv":
+            layer = lambda in_c, out_c: nn.Sequential(
+                nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
+                nn.Conv2d(in_c, out_c, kernel_size=1),
+            )
+        elif layer_type == "conv":
+            layer = lambda in_c, out_c: nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden blocks
-        self._hidden_conv = []
+        self._hidden_conv = nn.ModuleList()
+        in_channels = None  # Will be set in forward pass
         for n in num_units:
-            conv = layer(n, (3,3), padding='same',
-                         activation='relu', dtype=dtype)
+            conv = nn.Sequential(
+                layer(in_channels, n) if in_channels else nn.Identity(), nn.ReLU()
+            )
             self._hidden_conv.append(conv)
+            in_channels = n
 
         # Output block
-        self._output_conv = layer(d_s, (3,3), activation=None,
-                                  padding='same', dtype=dtype)
+        self._output_conv = layer(in_channels, d_s)
 
-    def call(self, inputs):
+    def forward(self, inputs):
         y, pe, h_hat = inputs
 
-        # y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-        #  tf.float
-        #  The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # h_hat : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #          2*num_rx_ant], tf.float
-        #     Channel estimate.
-
-        batch_size = tf.shape(y)[0]
-        num_tx = tf.shape(pe)[0]
+        batch_size = y.shape[0]
+        num_tx = pe.shape[1]
 
         # Stack the inputs
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, dim]
-
-        y = tf.tile(tf.expand_dims(y, axis=1), [1, num_tx, 1, 1, 1])
+        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1, 1)
         y = flatten_dims(y, 2, 0)
 
-        pe = tf.tile(tf.expand_dims(pe, axis=0), [batch_size, 1, 1, 1, 1])
+        pe = pe.repeat(batch_size, 1, 1, 1, 1)
         pe = flatten_dims(pe, 2, 0)
 
         # ignore h_hat if no channel estimate is provided
         if h_hat is not None:
             h_hat = flatten_dims(h_hat, 2, 0)
-            # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols,
-            #   4*num_rx_ant + 3]
-            z = tf.concat([y, pe, h_hat], axis=-1)
+            z = torch.cat([y, pe, h_hat], dim=-1)
         else:
-            z = tf.concat([y, pe], axis=-1)
+            z = torch.cat([y, pe], dim=-1)
 
         # Apply the neural network
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-        layers = self._hidden_conv
-        for conv in layers:
+        z = z.permute(0, 3, 1, 2)  # [batch*num_tx, channels, height, width]
+        for conv in self._hidden_conv:
             z = conv(z)
         z = self._output_conv(z)
+        z = z.permute(0, 2, 3, 1)  # [batch*num_tx, height, width, channels]
 
         # Unflatten
         s0 = split_dim(z, [batch_size, num_tx], 0)
 
-        return s0 # Initial state of every user
+        return s0  # Initial state of every user
 
-class AggregateUserStates(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class AggregateUserStates(nn.Module):
+    """
     For every user n, aggregate the states of all the other users n' != n.
 
     An MLP is applied to every state before aggregating.
@@ -174,48 +151,43 @@ class AggregateUserStates(Layer):
     (s, active_tx)
     Tuple:
 
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Size of the state vector.
 
-    active_tx: [batch_size, num_tx], tf.float
+    active_tx: [batch_size, num_tx], torch.Tensor
         Active user mask where each `0` indicates non-active users and `1`
         indicates an active user.
 
     Output
     -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         For every user `n`, aggregate state of the other users, i.e.,
         sum(s, axis=1) - s[:,n,:,:,:]
     """
 
-    def __init__(   self,
-                    d_s,
-                    num_units,
-                    layer_type="dense",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="dense", dtype=torch.float32):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        # Currently only dense is supported
-        if layer_type=="dense":
-            layer = Dense
-        else:
+        if layer_type != "dense":
             raise NotImplementedError("Unknown layer_type selected.")
 
-        self._hidden_layers = []
+        self._hidden_layers = nn.ModuleList()
         for n in num_units:
-            self._hidden_layers.append(layer(n, activation='relu', dtype=dtype))
-        self._output_layer = layer(d_s, activation=None, dtype=dtype)
+            self._hidden_layers.append(
+                nn.Sequential(nn.Linear(d_s, n, dtype=dtype), nn.ReLU())
+            )
+        self._output_layer = nn.Linear(
+            num_units[-1] if num_units else d_s, d_s, dtype=dtype
+        )
 
-    def call(self, inputs):
-        r"""
+    def forward(self, inputs):
+        """
         s, active_tx = inputs
 
         s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-            tf.float
+            torch.Tensor
             State tensor.
-        active_tx: [batch_size, num_tx], tf.float
+        active_tx: [batch_size, num_tx], torch.Tensor
             Active user mask.
         """
 
@@ -231,32 +203,34 @@ class AggregateUserStates(Layer):
         # Aggregate all states
         # [batch_size, 1, num_subcarriers, num_ofdm_symbols, d_s]
         # mask non active users
-        active_tx = expand_to_rank(active_tx, tf.rank(sp), axis=-1)
-        sp = tf.multiply(sp, active_tx)
+        active_tx = expand_to_rank(active_tx, sp.dim(), axis=-1)
+        sp = torch.mul(sp, active_tx)
 
         # aggregate and remove self-state
         # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-        a = tf.reduce_sum(sp, axis=1, keepdims=True) - sp
+        a = torch.sum(sp, dim=1, keepdim=True) - sp
 
         # scale by number of active users
-        p = tf.reduce_sum(active_tx, axis=1, keepdims=True) - 1.
-        p = tf.nn.relu(p) # clip negative values to ignore non-active user
+        p = torch.sum(active_tx, dim=1, keepdim=True) - 1.0
+        p = torch.relu(p)  # clip negative values to ignore non-active user
 
         # avoid 0 for single active user
-        p = tf.where(p==0., 1., tf.math.divide_no_nan(1.,p))
+        p = torch.where(
+            p == 0.0, torch.tensor(1.0, device=p.device), 1.0 / p.clamp(min=1e-10)
+        )
 
         # and scale states by number of aggregated users
-        a = tf.multiply(a, p)
+        a = torch.mul(a, p)
 
         return a
 
-class UpdateState(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class UpdateState(nn.Module):
+    """
     Updates the state tensor.
 
-    The network consist of len(num_units) hidden blocks, each block i
-    consisting of
+    The network consists of len(num_units) hidden blocks, each block i
+    consisting of:
     - A Separable conv layer (including a pointwise convolution)
     - A ReLU activation
 
@@ -269,108 +243,86 @@ class UpdateState(Layer):
     -----------
     d_s : int
         Size of the state vector.
-
     num_units : list of int
-        Number of kernel for the hidden separable convolutional layers.
-
+        Number of kernels for the hidden separable convolutional layers.
     layer_type: str | "sepconv" | "conv"
         Defines which Convolutional layers are used. Will be either
-        SeparableConv2D or Conv2D.
+        SeparableConv2d or Conv2d.
 
     Input
     ------
     (s, a, pe)
     Tuple:
-
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Size of the state vector.
-
-    a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Aggregated states from other users.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
         Map showing the position of the nearest pilot for every user in time
         and frequency. This can be seen as a form of positional encoding.
 
     Output
     -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Updated channel state vector.
     """
 
-    def __init__(   self,
-                    d_s,
-                    num_units,
-                    layer_type="sepconv",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        if layer_type=="sepconv":
-            layer = SeparableConv2D
-        elif layer_type=="conv":
-            layer = Conv2D
+        if layer_type == "sepconv":
+            layer = lambda in_c, out_c: nn.Sequential(
+                nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
+                nn.Conv2d(in_c, out_c, kernel_size=1),
+            )
+        elif layer_type == "conv":
+            layer = lambda in_c, out_c: nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden blocks
-        self._hidden_conv = []
+        self._hidden_conv = nn.ModuleList()
+        in_channels = 2 * d_s + 2  # Initial input channels
         for n in num_units:
-            conv = layer(n, (3,3), padding='same',
-                         activation="relu", dtype=dtype)
+            conv = nn.Sequential(layer(in_channels, n), nn.ReLU())
             self._hidden_conv.append(conv)
+            in_channels = n
 
         # Output block
-        self._output_conv = layer(d_s, (3,3), padding='same',
-                                  activation=None, dtype=dtype)
+        self._output_conv = layer(in_channels, d_s)
 
-    def call(self, inputs):
+    def forward(self, inputs):
         s, a, pe = inputs
 
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     State tensor.
-
-        # a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     Aggregated states from other users.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        batch_size = tf.shape(s)[0]
-        num_tx = tf.shape(s)[1]
+        batch_size, num_tx = s.shape[:2]
 
         # Stack the inputs
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        pe = tf.tile(tf.expand_dims(pe, axis=0), [batch_size, 1, 1, 1, 1])
+        pe = pe.repeat(batch_size, 1, 1, 1, 1)
         pe = flatten_dims(pe, 2, 0)
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         s = flatten_dims(s, 2, 0)
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         a = flatten_dims(a, 2, 0)
+
         # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, 2*d_s + 2]
-        z = tf.concat([a, s, pe], axis=-1)
+        z = torch.cat([a, s, pe], dim=-1)
 
         # Apply the neural network
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]]
-        layers = self._hidden_conv
-        for conv in layers:
+        z = z.permute(0, 3, 1, 2)  # [batch*num_tx, channels, height, width]
+        for conv in self._hidden_conv:
             z = conv(z)
         z = self._output_conv(z)
+        z = z.permute(0, 2, 3, 1)  # [batch*num_tx, height, width, channels]
+
         # Skip connection
         z = z + s
+
         # Unflatten
         s_new = split_dim(z, [batch_size, num_tx], 0)
 
-        return s_new # Update tensor state for each user
+        return s_new  # Update tensor state for each user
 
-class CGNNIt(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class CGNNIt(nn.Module):
+    """
     Implements an iteration of the CGNN detector.
 
     Consists of two stages: State aggregation followed by state update.
@@ -379,82 +331,60 @@ class CGNNIt(Layer):
     -----------
     d_s : int
         Size of the state vector.
-
     num_units_agg : list of int
         Number of kernel for the hidden dense layers of the aggregation network
-
     num_units_state_update : list of int
         Number of kernel for the hidden separable convolutional layers of the
         state-update network
-
     layer_type_dense: str | "dense"
         Layer type of Dense layers. Dense is used for state aggregation.
-
     layer_type_conv: str | "sepconv" | "conv"
         Layer type of convolutional layers. CNNs are used for state updates.
-
-    dtype: tf.float32 | tf.float64
+    dtype: torch.dtype
         Dtype of the layer.
 
     Input
     ------
     (s, pe, active_tx)
     Tuple:
-
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Size of the state vector.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
         Map showing the position of the nearest pilot for every user in time
-        and frequency.
-        This can be seen as a form of positional encoding.
-
-    active_tx: [batch_size, num_tx], tf.float
+        and frequency. This can be seen as a form of positional encoding.
+    active_tx: [batch_size, num_tx], torch.Tensor
         Active user mask where each `0` indicates non-active users and `1`
         indicates an active user.
 
     Output
     -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Updated channel state vector.
     """
 
-    def __init__(   self,
-                    d_s,
-                    num_units_agg,
-                    num_units_state_update,
-                    layer_type_dense="dense",
-                    layer_type_conv="sepconv",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        d_s,
+        num_units_agg,
+        num_units_state_update,
+        layer_type_dense="dense",
+        layer_type_conv="sepconv",
+        dtype=torch.float32,
+    ):
+        super().__init__()
 
         # Layer for state aggregation
-        self._state_aggreg = AggregateUserStates(d_s,
-                                                 num_units_agg,
-                                                 layer_type_dense,
-                                                 dtype=dtype)
+        self._state_aggreg = AggregateUserStates(
+            d_s, num_units_agg, layer_type_dense, dtype=dtype
+        )
 
         # State update
-        self._state_update = UpdateState(d_s,
-                                         num_units_state_update,
-                                         layer_type_conv,
-                                         dtype=dtype)
+        self._state_update = UpdateState(
+            d_s, num_units_state_update, layer_type_conv, dtype=dtype
+        )
 
-    def call(self, inputs):
+    def forward(self, inputs):
         s, pe, active_tx = inputs
-
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     Size of the state vector.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # active_tx: [batch_size, num_tx], tf.float
-        #      Active user mask.
 
         # User state aggregation
         a = self._state_aggreg((s, active_tx))
@@ -464,9 +394,9 @@ class CGNNIt(Layer):
 
         return s_new
 
-class ReadoutLLRs(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class ReadoutLLRs(nn.Module):
+    """
     Network computing LLRs from the state vectors.
 
     This is a MLP with len(num_units) hidden layers with ReLU activation and
@@ -478,69 +408,58 @@ class ReadoutLLRs(Layer):
     -----------
     num_bits_per_symbol : int
         Number of bits per symbol.
-
     num_units : list of int
         Number of units for the hidden layers.
-
     layer_type: str | "dense"
         Defines which type of Dense layers are used.
-
-    dtype: tf.float32 | tf.float64
+    dtype: torch.dtype
         Dtype of the layer.
 
     Input
     ------
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Data state.
 
     Output
     -------
     : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-       num_bits_per_symbol], tf.float
+       num_bits_per_symbol], torch.Tensor
         LLRs for each bit of each stream.
     """
 
-    def __init__(   self,
-                    num_bits_per_symbol,
-                    num_units,
-                    layer_type="dense",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self, num_bits_per_symbol, num_units, layer_type="dense", dtype=torch.float32
+    ):
+        super().__init__()
 
-       # allows for the configuration of multiple layer types
-        if layer_type=="dense":
-            layer = Dense
-        else:
+        if layer_type != "dense":
             raise NotImplementedError("Unknown layer_type selected.")
 
-        self._hidden_layers = []
+        self._hidden_layers = nn.ModuleList()
         for n in num_units:
-            self._hidden_layers.append(layer(n, activation='relu', dtype=dtype))
+            self._hidden_layers.append(
+                nn.Sequential(nn.Linear(n, n, dtype=dtype), nn.ReLU())
+            )
 
-        self._output_layer = layer(num_bits_per_symbol,
-                                   activation=None, dtype=dtype)
+        self._output_layer = nn.Linear(
+            num_units[-1] if num_units else num_bits_per_symbol,
+            num_bits_per_symbol,
+            dtype=dtype,
+        )
 
-    def call(self, s):
-
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #      tf.float
-        #     State vector
-
+    def forward(self, s):
         # Input of the MLP
         z = s
         # Apply MLP
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #           num_bits_per_symbol]
         for layer in self._hidden_layers:
             z = layer(z)
         llr = self._output_layer(z)
 
-        return llr # LLRs on the transmitted bits
+        return llr  # LLRs on the transmitted bits
 
-class ReadoutChEst(Layer):
-    # pylint: disable=line-too-long
-    r"""
+
+class ReadoutChEst(nn.Module):
+    """
     Network computing channel estimate.
 
     This is a MLP with len(num_units) hidden layers with ReLU activation and
@@ -550,226 +469,159 @@ class ReadoutChEst(Layer):
 
     Parameters
     -----------
-    num_bits_per_symbol : int
-        Number of bits per symbol.
-
+    num_rx_ant : int
+        Number of receive antennas.
     num_units : list of int
         Number of units for the hidden layers.
-
     layer_type: str | "dense"
         Defines which Dense layers are used.
+    dtype: torch.dtype
+        Data type of the layer.
 
     Input
     ------
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Data state.
 
     Output
     -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-      tf.float
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], torch.Tensor
         Channel estimate for each stream.
     """
 
-    def __init__(   self,
-                    num_rx_ant,
-                    num_units,
-                    layer_type="dense",
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, num_rx_ant, num_units, layer_type="dense", dtype=torch.float32):
+        super().__init__()
 
-       # allows for the configuration of multiple layer types
-        if layer_type=="dense":
-            layer = Dense
-        else:
+        if layer_type != "dense":
             raise NotImplementedError("Unknown layer_type selected.")
 
-        self._hidden_layers = []
+        self._hidden_layers = nn.ModuleList()
+        input_dim = None  # Will be set in forward pass
         for n in num_units:
-            self._hidden_layers.append(layer(n, activation='relu', dtype=dtype))
-        self._output_layer = layer(2*num_rx_ant, activation=None, dtype=dtype)
+            self._hidden_layers.append(
+                nn.Sequential(
+                    (
+                        nn.Linear(input_dim, n, dtype=dtype)
+                        if input_dim
+                        else nn.Identity()
+                    ),
+                    nn.ReLU(),
+                )
+            )
+            input_dim = n
 
-    def call(self, s):
+        self._output_layer = nn.Linear(input_dim, 2 * num_rx_ant, dtype=dtype)
 
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        # tf.float
-        #     State vector
-
+    def forward(self, s):
+        """
+        s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
+            State vector
+        """
         # Input of the MLP
         z = s
         # Apply MLP
-        # Output : [batch_size, num_tx, num_subcarriers,
-        #                   num_ofdm_symbols, 2*num_rx_ant]
         for layer in self._hidden_layers:
             z = layer(z)
         h_hat = self._output_layer(z)
 
-        return h_hat # Channel estimate
+        return h_hat  # Channel estimate
 
-class CGNN(Model):
-    # pylint: disable=line-too-long
-    r"""
-    Implements the core neural receiver consisting of
-    convolutional and graph layer components (CGNN).
 
-    Parameters
-    -----------
-    num_bits_per_symbol : list of ints
-        Number of bits per resource element. Defined as list for mixed MCS
-        schemes.
-
-    num_rx_ant : int
-        Number of receive antennas
-
-    num_it : int
-        Number of iterations.
-
-    d_s : int
-        Size of the state vector.
-
-    num_units_init : list of int
-        Number of hidden units for the init network.
-
-    num_units_agg : list of list of ints
-        Number of kernel for the hidden dense layers of the aggregation network
-        per iteration.
-
-    num_units_state : list of list of ints
-        Number of hidden units for the state-update network per iteration.
-
-    num_units_readout : list of int
-        Number of hidden units for the read-out network.
-
-    layer_type_dense: str | "dense"
-        Layer type of Dense layers.
-
-    layer_type_conv: str | "sepconv" | "conv"
-        Layer type of convolutional layers.
-
-    layer_type_readout: str | "dense"
-        Layer type of Dense readout layers.
-
-    training : boolean
-        Set to `True` if instantiated for training. Set to `False` otherwise.
-        In non-training mode, the readout is only applied to the last iteration.
-
-    dtype: tf.float32, tf.float64
-        Dtype of the layer.
-
-    Input
-    ------
-    (y, pe, h_hat, active_tx)
-    Tuple:
-
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], tf.float
-        The received OFDM resource grid after cyclic prefix removal and FFT.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        Map showing the position of the nearest pilot for every user in time
-        and frequency. This can be seen as a form of positional encoding.
-
-    h_hat : `None` or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                       2*num_rx_ant], tf.float
-        Initial channel estimate. If `None`, `h_hat` will be ignored.
-
-    active_tx: [batch_size, num_tx], tf.float
-        Active user mask where each `0` indicates non-active users and `1`
-        indicates an active user.
-
-    Output
-    -------
-    llrs : list of [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                    num_bits_per_symbol], tf.float
-        List of LLRs on (coded) bits. Each list entry refers to one iteration.
-        If Training is False, only the last iteration is returned.
-
-    h_hats : list of [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                      2*num_rx_ant], tf.float
-         List of refined channel estimates. Each list entry refers to one
-         iteration. If Training is False, only the last iteration is returned.
-    """
-
-    def __init__(   self,
-                    num_bits_per_symbol,
-                    num_rx_ant,
-                    num_it,
-                    d_s,
-                    num_units_init,
-                    num_units_agg,
-                    num_units_state ,
-                    num_units_readout,
-                    layer_type_dense,
-                    layer_type_conv,
-                    layer_type_readout,
-                    training=False,
-                    apply_multiloss=False,
-                    var_mcs_masking=False,
-                    dtype=tf.float32,
-                    **kwargs):
-        super().__init__(dtype=dtype,**kwargs)
+class CGNN(nn.Module):
+    def __init__(
+        self,
+        num_bits_per_symbol,
+        num_rx_ant,
+        num_it,
+        d_s,
+        num_units_init,
+        num_units_agg,
+        num_units_state,
+        num_units_readout,
+        layer_type_dense,
+        layer_type_conv,
+        layer_type_readout,
+        training=False,
+        apply_multiloss=False,
+        var_mcs_masking=False,
+        dtype=torch.float32,
+        **kwargs
+    ):
+        super().__init__()
 
         self._training = training
-
         self._apply_multiloss = apply_multiloss
         self._var_mcs_masking = var_mcs_masking
 
         # Initialization for the state
         if self._var_mcs_masking:
-            self._s_init = [StateInit(  d_s,
-                                num_units_init,
-                                layer_type=layer_type_conv,
-                                dtype=dtype)]
+            self._s_init = nn.ModuleList(
+                [
+                    StateInit(
+                        d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype
+                    )
+                ]
+            )
         else:
-            self._s_init = []
-            for _ in num_bits_per_symbol:
-                self._s_init.append(
-                    StateInit(  d_s,
-                                num_units_init,
-                                layer_type=layer_type_conv,
-                                dtype=dtype))
+            self._s_init = nn.ModuleList(
+                [
+                    StateInit(
+                        d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype
+                    )
+                    for _ in num_bits_per_symbol
+                ]
+            )
 
         # Iterations blocks
-        self._iterations = []
-        for i in range(num_it):
-            it = CGNNIt(    d_s,
-                            num_units_agg[i],
-                            num_units_state[i],
-                            layer_type_dense=layer_type_dense,
-                            layer_type_conv=layer_type_conv,
-                            dtype=dtype)
-            self._iterations.append(it)
+        self._iterations = nn.ModuleList(
+            [
+                CGNNIt(
+                    d_s,
+                    num_units_agg[i],
+                    num_units_state[i],
+                    layer_type_dense=layer_type_dense,
+                    layer_type_conv=layer_type_conv,
+                    dtype=dtype,
+                )
+                for i in range(num_it)
+            ]
+        )
         self._num_it = num_it
 
         # Readouts
         if self._var_mcs_masking:
-            self._readout_llrs = [ReadoutLLRs(np.max(num_bits_per_symbol),
-                                            num_units_readout,
-                                            layer_type=layer_type_readout,
-                                            dtype=dtype)]
+            self._readout_llrs = nn.ModuleList(
+                [
+                    ReadoutLLRs(
+                        max(num_bits_per_symbol),
+                        num_units_readout,
+                        layer_type=layer_type_readout,
+                        dtype=dtype,
+                    )
+                ]
+            )
         else:
-            self._readout_llrs = []
-            for num_bits in num_bits_per_symbol:
-                self._readout_llrs.append(
-                    ReadoutLLRs(num_bits,
-                                            num_units_readout,
-                                            layer_type=layer_type_readout,
-                                            dtype=dtype))
-        # The h_hat readout is mostly used for faster training convergence
-        # by using a second loss on the channel estimate.
-        # However, it can be also used after deployment, e.g., for reporting to
-        # higher layers.
-        self._readout_chest = ReadoutChEst(num_rx_ant,
-                                           num_units_readout,
-                                           layer_type=layer_type_readout,
-                                           dtype=dtype)
+            self._readout_llrs = nn.ModuleList(
+                [
+                    ReadoutLLRs(
+                        num_bits,
+                        num_units_readout,
+                        layer_type=layer_type_readout,
+                        dtype=dtype,
+                    )
+                    for num_bits in num_bits_per_symbol
+                ]
+            )
+
+        self._readout_chest = ReadoutChEst(
+            num_rx_ant, num_units_readout, layer_type=layer_type_readout, dtype=dtype
+        )
 
         self._num_mcss_supported = len(num_bits_per_symbol)
         self._num_bits_per_symbol = num_bits_per_symbol
 
     @property
     def apply_multiloss(self):
-        """Average loss over all iterations or eval just the last iteration."""
         return self._apply_multiloss
 
     @apply_multiloss.setter
@@ -779,94 +631,55 @@ class CGNN(Model):
 
     @property
     def num_it(self):
-        """Number of receiver iterations."""
         return self._num_it
 
     @num_it.setter
     def num_it(self, val):
-        assert (val >= 1) and (val <= len(self._iterations)),\
-            "Invalid number of iterations"
+        assert (val >= 1) and (
+            val <= len(self._iterations)
+        ), "Invalid number of iterations"
         self._num_it = val
 
-    def call(self, inputs):
+    def forward(self, inputs):
         y, pe, h_hat, active_tx, mcs_ue_mask = inputs
 
-        # y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-        #     tf.float
-        #   The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        # pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2],
-        #      tf.float
-        #  Map showing the position of the nearest pilot for every user in time
-        #     and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # h_hat : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #          2*num_rx_ant], tf.float
-        #     Channel estimate.
-
-        # active_tx: [batch_size, num_tx], tf.float
-        #      Active user mask.
-
-        ########################################
         # Normalization
-        #########################################
-        # we normalize the input such that each batch sample has unit power
-        # [batch_size, 1, 1, 1]
-        norm_scaling = tf.reduce_mean(tf.square(y), axis=(1,2,3), keepdims=True)
-        norm_scaling = tf.math.divide_no_nan(1., tf.sqrt(norm_scaling))
-        # [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-        y = y*norm_scaling
-        # [batch_size, 1, 1, 1, 1]
-        norm_scaling = tf.expand_dims(norm_scaling, axis=1)
-        # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
+        norm_scaling = torch.mean(torch.square(y), dim=(1, 2, 3), keepdim=True)
+        norm_scaling = torch.where(
+            norm_scaling != 0,
+            1.0 / torch.sqrt(norm_scaling),
+            torch.tensor(1.0, device=y.device),
+        )
+        y = y * norm_scaling
+        norm_scaling = norm_scaling.unsqueeze(1)
         if h_hat is not None:
-            h_hat = h_hat*norm_scaling
+            h_hat = h_hat * norm_scaling
 
-        ########################################
         # State initialization
-        ########################################
-
-        # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         if self._var_mcs_masking:
             s = self._s_init[0]((y, pe, h_hat))
         else:
             s = self._s_init[0]((y, pe, h_hat)) * expand_to_rank(
-                        tf.gather(mcs_ue_mask, indices=0, axis=2), 5, axis=-1)
+                mcs_ue_mask[:, :, 0:1], 5, axis=-1
+            )
             for idx in range(1, self._num_mcss_supported):
                 s = s + self._s_init[idx]((y, pe, h_hat)) * expand_to_rank(
-                        tf.gather(mcs_ue_mask, indices=idx, axis=2), 5, axis=-1)
+                    mcs_ue_mask[:, :, idx : idx + 1], 5, axis=-1
+                )
 
-        ########################################
         # Run receiver iterations
-        ########################################
-        # Remark: each iteration uses a different NN with different weights
-        # weight sharing could possibly be used, but degrades the performance
         llrs = []
         h_hats = []
         for i in range(self._num_it):
             it = self._iterations[i]
-            # State update
-            # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
             s = it([s, pe, active_tx])
 
-            # Read-outs
-            # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-            #  num_bits_per_symbol]
-            # only during training every intermediate iteration is tracked
-            if (self._training and self._apply_multiloss) or i==self._num_it-1:
+            if (self._training and self._apply_multiloss) or i == self._num_it - 1:
                 llrs_ = []
-                # iterate over all MCS schemes individually
                 for idx in range(self._num_mcss_supported):
                     if self._var_mcs_masking:
                         llrs__ = self._readout_llrs[0](s)
-                        # Masking of LLR outputs to the desired
-                        # num_bits_per_symbol[idx] (for all users and all MCS
-                        # schemes)
-                        llrs__ = tf.gather(
-                            llrs__,
-                            indices=tf.range(self._num_bits_per_symbol[idx]),
-                            axis=-1)
+                        llrs__ = llrs__[..., : self._num_bits_per_symbol[idx]]
                     else:
                         llrs__ = self._readout_llrs[idx](s)
                     llrs_.append(llrs__)
@@ -874,6 +687,17 @@ class CGNN(Model):
                 h_hats.append(self._readout_chest(s))
 
         return llrs, h_hats
+
+
+
+
+##########################3
+############################3
+##############################
+#######################
+#################################
+###################################
+############################
 
 class CGNNOFDM(Model):
     # pylint: disable=line-too-long
