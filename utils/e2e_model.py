@@ -301,7 +301,7 @@ class E2E_Model(nn.Module):
         active_dmrs=None,
     ):
         """defines end-to-end system model."""
-
+        print("E2E forward called")
         # randomly sample num_tx active dmrs ports
         if num_tx is None:
             num_tx = self._sys_parameters.max_num_tx
