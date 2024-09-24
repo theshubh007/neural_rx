@@ -436,7 +436,7 @@ class ReadoutLLRs(nn.Module):
     ):
         super().__init__()
 
-        if layer_type != "dense":
+        if layer_type != "dense" and layer_type != "linear":
             raise NotImplementedError("Unknown layer_type selected.")
 
         self._hidden_layers = nn.ModuleList()
@@ -498,7 +498,7 @@ class ReadoutChEst(nn.Module):
     ):
         super().__init__()
 
-        if layer_type != "dense":
+        if layer_type != "dense" and layer_type != "linear":
             raise NotImplementedError("Unknown layer_type selected.")
 
         self._hidden_layers = nn.ModuleList()
