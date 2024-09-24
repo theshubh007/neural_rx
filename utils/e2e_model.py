@@ -20,6 +20,13 @@ import torch
 import torch.nn as nn
 
 
+# Combine transmit signals from all MCSs
+def expand_to_rank(tensor, target_rank, axis=-1):
+    while tensor.dim() < target_rank:
+        tensor = tensor.unsqueeze(axis)
+    return tensor
+
+
 class E2E_Model(nn.Module):
     r"""E2E_Model(sys_parameters, training=False, return_tb_status=False, **kwargs)
     End-to-end model for system evaluation.
@@ -374,12 +381,6 @@ class E2E_Model(nn.Module):
         # Sample a random slot number and assigns its pilots to the transmitter
         if self._training:
             self._set_transmitter_random_pilots()
-
-        # Combine transmit signals from all MCSs
-        def expand_to_rank(tensor, target_rank, axis=-1):
-            while tensor.dim() < target_rank:
-                tensor = tensor.unsqueeze(axis)
-            return tensor
 
         _mcs_ue_mask = expand_to_rank(
             torch.gather(
