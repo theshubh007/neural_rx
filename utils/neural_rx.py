@@ -74,7 +74,7 @@ class StateInit(nn.Module):
             layer = lambda in_c, out_c: nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
         else:
             raise NotImplementedError("Unknown layer_type selected.")
-
+        print("flag2: StateInit")
         # Hidden blocks
         self._hidden_conv = nn.ModuleList()
         in_channels = None  # Will be set in forward pass
