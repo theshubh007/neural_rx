@@ -19,7 +19,7 @@ from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 import torch
 import torch.nn as nn
-
+import tf2torch
 
 # Combine transmit signals from all MCSs
 def expand_to_rank(tensor, target_rank, axis=-1):
@@ -398,15 +398,18 @@ class E2E_Model(nn.Module):
         ).to(torch.complex64)
         print("flag2.2")
 
-        def tf_to_torch(tf_func):
-            def wrapper(x):
-                tf_input = tf.convert_to_tensor(x.detach().cpu().numpy())
-                tf_output = tf_func(tf_input)
-                return torch.from_numpy(tf_output.numpy())
+        # def tf_to_torch(tf_func):
+        #     def wrapper(x):
+        #         tf_input = tf.convert_to_tensor(x.detach().cpu().numpy())
+        #         tf_output = tf_func(tf_input)
+        #         return torch.from_numpy(tf_output.numpy())
 
-            return wrapper
+        #     return wrapper
 
-        torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
+        # torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
+        # x = _mcs_ue_mask * torch_transmitter(b[0])
+        # Convert the TensorFlow model to PyTorch
+        torch_transmitter = tf2torch.convert(self._transmitters[mcs_arr_eval[0]])
         x = _mcs_ue_mask * torch_transmitter(b[0])
         print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
