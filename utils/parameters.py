@@ -15,6 +15,7 @@ import numpy as np
 import configparser
 
 import torch
+import torch.nn as nn
 
 # import tensorflow as tf
 from os.path import exists
@@ -31,6 +32,20 @@ from sionna.mimo import StreamManagement
 from sionna.channel import OFDMChannel, AWGN
 from .channel_models import DoubleTDLChannel, DatasetChannel
 from .impairments import FrequencyOffset
+
+
+class PUSCHTransmitterWrapper(nn.Module):
+    def __init__(self, pusch_transmitter):
+        super().__init__()
+        self.pusch_transmitter = pusch_transmitter
+
+    def forward(self, input_bits):
+        # Convert PyTorch tensor to NumPy array
+        input_np = input_bits.detach().cpu().numpy()
+        # Call the original TensorFlow-based transmitter
+        output_tf = self.pusch_transmitter(input_np)
+        # Convert the output back to a PyTorch tensor
+        return torch.from_numpy(output_tf.numpy())
 
 
 class Parameters:
@@ -237,14 +252,13 @@ class Parameters:
         self.transmitters = []
         for mcs_list_idx in range(len(mcs_list)):
             # and init transmitter
-            self.transmitters.append(
-                PUSCHTransmitter(
-                    self.pusch_configs[mcs_list_idx],
-                    return_bits=False,
-                    output_domain="freq",
-                    verbose=self.verbose,
-                )
+            tf_transmitter = PUSCHTransmitter(
+                self.pusch_configs[mcs_list_idx],
+                return_bits=False,
+                output_domain="freq",
+                verbose=self.verbose,
             )
+            self.transmitters.append(PUSCHTransmitterWrapper(tf_transmitter))
 
             # support end-to-end learning / custom constellations
             # see https://arxiv.org/pdf/2009.05261 for details

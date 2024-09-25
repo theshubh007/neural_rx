@@ -55,7 +55,7 @@ class ResourceGridWrapper:
 
     @property
     def fft_size(self):
-        return self._resource_grid.fft_size    
+        return self._resource_grid.fft_size
 
 
 class StateInit(nn.Module):
@@ -797,10 +797,11 @@ class CGNNOFDM(nn.Module):
             :, 0
         ]  # One stream only
         pilot_ind = torch.where(rg_type == 1)
-        
+
         def flatten_last_dims(x, n_dims):
             shape = x.shape
             return x.reshape(*shape[:-n_dims], -1)
+
         # Convert TensorFlow tensor to PyTorch tensor
         pilots = torch.from_numpy(self._rg.pilot_pattern.pilots.numpy())
         pilots = flatten_last_dims(pilots, 3)
