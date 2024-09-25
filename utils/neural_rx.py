@@ -757,10 +757,11 @@ class CGNNOFDM(nn.Module):
         # Pre-compute positional encoding
         rg_type = torch.from_numpy(self._rg.build_type_grid().numpy())[:, 0]
         pilot_ind = torch.where(rg_type == 1)
-        pilots = torch.from_numpy(
-            self._rg.pilot_pattern.pilots.numpy()
-        )  # Convert to PyTorch tensor
+
+        # Convert TensorFlow tensor to NumPy array, then to PyTorch tensor
+        pilots = torch.from_numpy(self._rg.pilot_pattern.pilots.numpy())
         pilots = flatten_last_dims(pilots, 3)
+
         pilots_only = torch.zeros_like(rg_type, dtype=torch.complex64)
         pilots_only[pilot_ind] = pilots
 
