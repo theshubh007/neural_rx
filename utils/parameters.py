@@ -38,6 +38,7 @@ class PUSCHTransmitterWrapper(nn.Module):
     def __init__(self, pusch_transmitter):
         super().__init__()
         self.pusch_transmitter = pusch_transmitter
+        self._resource_grid = ResourceGridWrapper(pusch_transmitter._resource_grid)
         self._mapper = MapperWrapper(pusch_transmitter._mapper)
 
     def forward(self, input_bits):
@@ -47,6 +48,31 @@ class PUSCHTransmitterWrapper(nn.Module):
         output_tf = self.pusch_transmitter(input_np)
         # Convert the output back to a PyTorch tensor
         return torch.from_numpy(output_tf.numpy())
+
+
+class ResourceGridWrapper:
+    def __init__(self, resource_grid):
+        self._resource_grid = resource_grid
+
+    def build_type_grid(self):
+        return torch.from_numpy(self._resource_grid.build_type_grid().numpy())
+
+    @property
+    def pilot_pattern(self):
+        return PilotPatternWrapper(self._resource_grid.pilot_pattern)
+
+
+class PilotPatternWrapper:
+    def __init__(self, pilot_pattern):
+        self._pilot_pattern = pilot_pattern
+
+    @property
+    def pilots(self):
+        return torch.from_numpy(self._pilot_pattern.pilots.numpy())
+
+    @property
+    def mask(self):
+        return torch.from_numpy(self._pilot_pattern.mask.numpy())
 
 
 class MapperWrapper:
