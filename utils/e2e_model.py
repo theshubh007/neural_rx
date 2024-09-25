@@ -10,7 +10,6 @@
 
 ##### E2E model for system evaluations #####
 
-import tensorflow as tf
 
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
@@ -19,13 +18,27 @@ from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 import torch
 import torch.nn as nn
-import tf2torch
+import onnxruntime
+import tf2onnx
+
 
 # Combine transmit signals from all MCSs
 def expand_to_rank(tensor, target_rank, axis=-1):
     while tensor.dim() < target_rank:
         tensor = tensor.unsqueeze(axis)
     return tensor
+
+
+# Create a PyTorch wrapper for ONNX model
+class ONNXWrapper(nn.Module):
+    def __init__(self, ort_session):
+        super().__init__()
+        self.ort_session = ort_session
+
+    def forward(self, x):
+        ort_inputs = {self.ort_session.get_inputs()[0].name: x.detach().cpu().numpy()}
+        ort_outputs = self.ort_session.run(None, ort_inputs)
+        return torch.from_numpy(ort_outputs[0])
 
 
 class E2E_Model(nn.Module):
@@ -397,6 +410,14 @@ class E2E_Model(nn.Module):
             axis=-1,
         ).to(torch.complex64)
         print("flag2.2")
+        # Convert TensorFlow model to ONNX
+        onnx_model, _ = tf2onnx.convert.from_keras(self._transmitters[mcs_arr_eval[0]])
+
+        # Create ONNX runtime session
+        ort_session = onnxruntime.InferenceSession(onnx_model.SerializeToString())
+        # Usage
+        onnx_transmitter = ONNXWrapper(ort_session)
+        x = _mcs_ue_mask * onnx_transmitter
 
         # def tf_to_torch(tf_func):
         #     def wrapper(x):
@@ -409,8 +430,8 @@ class E2E_Model(nn.Module):
         # torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
         # x = _mcs_ue_mask * torch_transmitter(b[0])
         # Convert the TensorFlow model to PyTorch
-        torch_transmitter = tf2torch.convert(self._transmitters[mcs_arr_eval[0]])
-        x = _mcs_ue_mask * torch_transmitter(b[0])
+        # torch_transmitter = tf2torch.convert(self._transmitters[mcs_arr_eval[0]])
+        # x = _mcs_ue_mask * torch_transmitter(b[0])
         print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
