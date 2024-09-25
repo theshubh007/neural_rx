@@ -419,19 +419,28 @@ class E2E_Model(nn.Module):
         onnx_transmitter = ONNXWrapper(ort_session)
         x = _mcs_ue_mask * onnx_transmitter
 
-        # def tf_to_torch(tf_func):
-        #     def wrapper(x):
-        #         tf_input = tf.convert_to_tensor(x.detach().cpu().numpy())
-        #         tf_output = tf_func(tf_input)
-        #         return torch.from_numpy(tf_output.numpy())
+        def tf_to_torch(tf_func):
+            def wrapper(x):
+                if isinstance(x, torch.Tensor):
+                    # If input is already a PyTorch tensor, convert to numpy
+                    x_np = x.cpu().numpy()
+                else:
+                    # If input is a TensorFlow tensor, convert to numpy
+                    x_np = x.numpy()
+                
+                tf_input = tf.convert_to_tensor(x_np)
+                tf_output = tf_func(tf_input)
+                return torch.from_numpy(tf_output.numpy())
+            return wrapper
 
-        #     return wrapper
-
-        # torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
+        torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
         # x = _mcs_ue_mask * torch_transmitter(b[0])
         # Convert the TensorFlow model to PyTorch
         # torch_transmitter = tf2torch.convert(self._transmitters[mcs_arr_eval[0]])
         # x = _mcs_ue_mask * torch_transmitter(b[0])
+
+        ###################################
+        x=
         print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
