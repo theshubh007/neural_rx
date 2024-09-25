@@ -807,7 +807,11 @@ class CGNNOFDM(nn.Module):
         # Pre-compute positional encoding
         rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
         pilot_ind = torch.where(rg_type == 1)
-        pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3)
+
+        # Convert TensorFlow tensor to PyTorch tensor
+        pilots = torch.from_numpy(self._rg.pilot_pattern.pilots.numpy())
+        pilots = flatten_last_dims(pilots, 3)
+
         pilots_only = torch.zeros_like(rg_type, dtype=torch.complex64)
         pilots_only[pilot_ind] = pilots
 
