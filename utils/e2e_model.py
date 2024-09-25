@@ -29,16 +29,16 @@ def expand_to_rank(tensor, target_rank, axis=-1):
     return tensor
 
 
-# Create a PyTorch wrapper for ONNX model
-class ONNXWrapper(nn.Module):
-    def __init__(self, ort_session):
-        super().__init__()
-        self.ort_session = ort_session
+# # Create a PyTorch wrapper for ONNX model
+# class ONNXWrapper(nn.Module):
+#     def __init__(self, ort_session):
+#         super().__init__()
+#         self.ort_session = ort_session
 
-    def forward(self, x):
-        ort_inputs = {self.ort_session.get_inputs()[0].name: x.detach().cpu().numpy()}
-        ort_outputs = self.ort_session.run(None, ort_inputs)
-        return torch.from_numpy(ort_outputs[0])
+#     def forward(self, x):
+#         ort_inputs = {self.ort_session.get_inputs()[0].name: x.detach().cpu().numpy()}
+#         ort_outputs = self.ort_session.run(None, ort_inputs)
+#         return torch.from_numpy(ort_outputs[0])
 
 
 class E2E_Model(nn.Module):
@@ -427,10 +427,11 @@ class E2E_Model(nn.Module):
                 else:
                     # If input is a TensorFlow tensor, convert to numpy
                     x_np = x.numpy()
-                
+
                 tf_input = tf.convert_to_tensor(x_np)
                 tf_output = tf_func(tf_input)
                 return torch.from_numpy(tf_output.numpy())
+
             return wrapper
 
         torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
@@ -440,7 +441,7 @@ class E2E_Model(nn.Module):
         # x = _mcs_ue_mask * torch_transmitter(b[0])
 
         ###################################
-        x=
+
         print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
