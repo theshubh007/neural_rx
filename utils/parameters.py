@@ -38,14 +38,6 @@ class PUSCHTransmitterWrapper(nn.Module):
     def __init__(self, pusch_transmitter):
         super().__init__()
         self.pusch_transmitter = pusch_transmitter
-        self._resource_grid = ResourceGridWrapper(pusch_transmitter._resource_grid)
-        self._mapper = MapperWrapper(pusch_transmitter._mapper)
-        # self._tb_encoder = TBEncoderWrapper(pusch_transmitter._tb_encoder)
-
-    def __getattr__(self, name):
-        if name == "_tb_encoder":
-            return TBEncoderWrapper(self.pusch_transmitter._tb_encoder)
-        return getattr(self.pusch_transmitter, name)
 
     def forward(self, input_bits):
         # Convert PyTorch tensor to NumPy array
@@ -54,71 +46,6 @@ class PUSCHTransmitterWrapper(nn.Module):
         output_tf = self.pusch_transmitter(input_np)
         # Convert the output back to a PyTorch tensor
         return torch.from_numpy(output_tf.numpy())
-
-
-class TBEncoderWrapper(nn.Module):
-    def __init__(self, tb_encoder):
-        super().__init__()
-        self.tb_encoder = tb_encoder
-
-    def forward(self, x):
-        return torch.from_numpy(self.tb_encoder(x.cpu().numpy()).numpy())
-
-
-class ResourceGridWrapper:
-    def __init__(self, resource_grid):
-        self._resource_grid = resource_grid
-
-    def build_type_grid(self):
-        return torch.from_numpy(self._resource_grid.build_type_grid().numpy())
-
-    @property
-    def pilot_pattern(self):
-        return PilotPatternWrapper(self._resource_grid.pilot_pattern)
-
-
-class PilotPatternWrapper:
-    def __init__(self, pilot_pattern):
-        self._pilot_pattern = pilot_pattern
-
-    @property
-    def pilots(self):
-        return torch.from_numpy(self._pilot_pattern.pilots.numpy())
-
-    @property
-    def mask(self):
-        return torch.from_numpy(self._pilot_pattern.mask.numpy())
-
-
-class MapperWrapper:
-    def __init__(self, original_mapper):
-        self.original_mapper = original_mapper
-        self.constellation = ConstellationWrapper(original_mapper.constellation)
-
-
-class ConstellationWrapper:
-    def __init__(self, original_constellation):
-        self.original_constellation = original_constellation
-        self.trainable = original_constellation.trainable
-        self.center = original_constellation.center
-
-    @property
-    def trainable(self):
-        return self._trainable
-
-    @trainable.setter
-    def trainable(self, value):
-        self._trainable = value
-        self.original_constellation.trainable = value
-
-    @property
-    def center(self):
-        return self._center
-
-    @center.setter
-    def center(self, value):
-        self._center = value
-        self.original_constellation.center = value
 
 
 class Parameters:
@@ -325,24 +252,24 @@ class Parameters:
         self.transmitters = []
         for mcs_list_idx in range(len(mcs_list)):
             # and init transmitter
-            tf_transmitter = PUSCHTransmitter(
-                self.pusch_configs[mcs_list_idx],
-                return_bits=False,
-                output_domain="freq",
-                verbose=self.verbose,
+            self.transmitters.append(
+                PUSCHTransmitter(
+                    self.pusch_configs[mcs_list_idx],
+                    return_bits=False,
+                    output_domain="freq",
+                    verbose=self.verbose,
+                )
             )
-            wrapped_transmitter = PUSCHTransmitterWrapper(tf_transmitter)
-            self.transmitters.append(wrapped_transmitter)
+            
 
             # support end-to-end learning / custom constellations
             # see https://arxiv.org/pdf/2009.05261 for details
             if self.custom_constellation:  # trainable constellations
                 print("Activating trainable custom constellations.")
-                wrapped_transmitter._mapper.constellation.trainable = True
-                wrapped_transmitter._mapper.constellation.center = True
+                self.transmitters[mcs_list_idx]._mapper.constellation.trainable = True
             # Center constellations. This could be also deactivated for more
             # degrees of freedom.
-            # self.transmitters[mcs_list_idx]._mapper.constellation.center = True
+            self.transmitters[mcs_list_idx]._mapper.constellation.center = True
 
         # chest will fail if we use explicit masking of pilots.
         if self.mask_pilots and self.initial_chest in ("ls", "nn"):

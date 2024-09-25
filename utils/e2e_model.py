@@ -10,7 +10,8 @@
 
 ##### E2E model for system evaluations #####
 
-# import tensorflow as tf
+import tensorflow as tf
+
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
 from sionna.utils import BinarySource, ebnodb2no  # , expand_to_rank
@@ -396,7 +397,17 @@ class E2E_Model(nn.Module):
             axis=-1,
         ).to(torch.complex64)
         print("flag2.2")
-        x = _mcs_ue_mask * self._transmitters[mcs_arr_eval[0]](b[0])
+
+        def tf_to_torch(tf_func):
+            def wrapper(x):
+                tf_input = tf.convert_to_tensor(x.detach().cpu().numpy())
+                tf_output = tf_func(tf_input)
+                return torch.from_numpy(tf_output.numpy())
+
+            return wrapper
+
+        torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
+        x = _mcs_ue_mask * torch_transmitter(b[0])
         print(type(x))
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = expand_to_rank(
