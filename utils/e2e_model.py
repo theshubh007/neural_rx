@@ -10,7 +10,7 @@
 
 ##### E2E model for system evaluations #####
 
-
+import tensorflow as tf
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
 from sionna.utils import BinarySource, ebnodb2no  # , expand_to_rank
@@ -410,14 +410,14 @@ class E2E_Model(nn.Module):
             axis=-1,
         ).to(torch.complex64)
         print("flag2.2")
-        # Convert TensorFlow model to ONNX
-        onnx_model, _ = tf2onnx.convert.from_keras(self._transmitters[mcs_arr_eval[0]])
+        # # Convert TensorFlow model to ONNX
+        # onnx_model, _ = tf2onnx.convert.from_keras(self._transmitters[mcs_arr_eval[0]])
 
-        # Create ONNX runtime session
-        ort_session = onnxruntime.InferenceSession(onnx_model.SerializeToString())
+        # # Create ONNX runtime session
+        # ort_session = onnxruntime.InferenceSession(onnx_model.SerializeToString())
         # Usage
-        onnx_transmitter = ONNXWrapper(ort_session)
-        x = _mcs_ue_mask * onnx_transmitter
+        # onnx_transmitter = ONNXWrapper(ort_session)
+        # x = _mcs_ue_mask * onnx_transmitter
 
         def tf_to_torch(tf_func):
             def wrapper(x):
@@ -435,7 +435,7 @@ class E2E_Model(nn.Module):
             return wrapper
 
         torch_transmitter = tf_to_torch(self._transmitters[mcs_arr_eval[0]])
-        # x = _mcs_ue_mask * torch_transmitter(b[0])
+        x = _mcs_ue_mask * torch_transmitter(b[0])
         # Convert the TensorFlow model to PyTorch
         # torch_transmitter = tf2torch.convert(self._transmitters[mcs_arr_eval[0]])
         # x = _mcs_ue_mask * torch_transmitter(b[0])
