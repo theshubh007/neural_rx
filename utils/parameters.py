@@ -42,6 +42,11 @@ class PUSCHTransmitterWrapper(nn.Module):
         self._mapper = MapperWrapper(pusch_transmitter._mapper)
         # self._tb_encoder = TBEncoderWrapper(pusch_transmitter._tb_encoder)
 
+    def __getattr__(self, name):
+        if name == "_tb_encoder":
+            return TBEncoderWrapper(self.pusch_transmitter._tb_encoder)
+        return getattr(self.pusch_transmitter, name)
+
     def forward(self, input_bits):
         # Convert PyTorch tensor to NumPy array
         input_np = input_bits.detach().cpu().numpy()
@@ -51,26 +56,13 @@ class PUSCHTransmitterWrapper(nn.Module):
         return torch.from_numpy(output_tf.numpy())
 
 
-class TBEncoderWrapper:
+class TBEncoderWrapper(nn.Module):
     def __init__(self, tb_encoder):
+        super().__init__()
         self.tb_encoder = tb_encoder
 
-    def __call__(self, *args, **kwargs):
-        # Convert PyTorch tensors to NumPy arrays
-        args_np = [
-            arg.detach().cpu().numpy() if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        ]
-        kwargs_np = {
-            k: v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
-            for k, v in kwargs.items()
-        }
-
-        # Call the original TensorFlow-based encoder
-        output_tf = self.tb_encoder(*args_np, **kwargs_np)
-
-        # Convert the output back to a PyTorch tensor
-        return torch.from_numpy(output_tf.numpy())
+    def forward(self, x):
+        return torch.from_numpy(self.tb_encoder(x.cpu().numpy()).numpy())
 
 
 class ResourceGridWrapper:
