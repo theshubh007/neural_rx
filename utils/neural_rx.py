@@ -40,6 +40,35 @@ class PilotPatternWrapper:
     def pilots(self):
         return torch.from_numpy(self._pilot_pattern.pilots.numpy())
 
+    @property
+    def mask(self):
+        return torch.from_numpy(self._pilot_pattern.mask.numpy())
+
+    @property
+    def num_data_symbols(self):
+        return self._pilot_pattern.num_data_symbols
+
+
+class ResourceGridWrapper:
+    def __init__(self, resource_grid):
+        self._resource_grid = resource_grid
+        self._pilot_pattern = PilotPatternWrapper(resource_grid.pilot_pattern)
+
+    def build_type_grid(self):
+        return torch.from_numpy(self._resource_grid.build_type_grid().numpy())
+
+    @property
+    def pilot_pattern(self):
+        return self._pilot_pattern
+
+    @property
+    def num_ofdm_symbols(self):
+        return self._resource_grid.num_ofdm_symbols
+
+    @property
+    def fft_size(self):
+        return self._resource_grid.fft_size
+
 
 class StateInit(nn.Module):
     """
