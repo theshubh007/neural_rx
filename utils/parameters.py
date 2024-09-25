@@ -40,7 +40,7 @@ class PUSCHTransmitterWrapper(nn.Module):
         self.pusch_transmitter = pusch_transmitter
         self._resource_grid = ResourceGridWrapper(pusch_transmitter._resource_grid)
         self._mapper = MapperWrapper(pusch_transmitter._mapper)
-        self._tb_encoder = TBEncoderWrapper(pusch_transmitter._tb_encoder)
+        # self._tb_encoder = TBEncoderWrapper(pusch_transmitter._tb_encoder)
 
     def forward(self, input_bits):
         # Convert PyTorch tensor to NumPy array
