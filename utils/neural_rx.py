@@ -20,18 +20,6 @@ from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
-class ResourceGridWrapper:
-    def __init__(self, resource_grid):
-        self._resource_grid = resource_grid
-
-    def build_type_grid(self):
-        return torch.from_numpy(self._resource_grid.build_type_grid().numpy())
-
-    @property
-    def pilot_pattern(self):
-        return PilotPatternWrapper(self._resource_grid.pilot_pattern)
-
-
 class PilotPatternWrapper:
     def __init__(self, pilot_pattern):
         self._pilot_pattern = pilot_pattern
@@ -39,14 +27,6 @@ class PilotPatternWrapper:
     @property
     def pilots(self):
         return torch.from_numpy(self._pilot_pattern.pilots.numpy())
-
-    @property
-    def mask(self):
-        return torch.from_numpy(self._pilot_pattern.mask.numpy())
-
-    @property
-    def num_data_symbols(self):
-        return self._pilot_pattern.num_data_symbols
 
 
 class ResourceGridWrapper:
@@ -60,14 +40,6 @@ class ResourceGridWrapper:
     @property
     def pilot_pattern(self):
         return self._pilot_pattern
-
-    @property
-    def num_ofdm_symbols(self):
-        return self._resource_grid.num_ofdm_symbols
-
-    @property
-    def fft_size(self):
-        return self._resource_grid.fft_size
 
 
 class StateInit(nn.Module):
@@ -805,13 +777,17 @@ class CGNNOFDM(nn.Module):
             self._mse = nn.MSELoss(reduction="none")
 
         # Pre-compute positional encoding
-        rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
+        rg_type = torch.from_numpy(self._rg.build_type_grid().numpy())[
+            :, 0
+        ]  # One stream only
         pilot_ind = torch.where(rg_type == 1)
-
+        
+        def flatten_last_dims(x, n_dims):
+            shape = x.shape
+            return x.reshape(*shape[:-n_dims], -1)
         # Convert TensorFlow tensor to PyTorch tensor
         pilots = torch.from_numpy(self._rg.pilot_pattern.pilots.numpy())
         pilots = flatten_last_dims(pilots, 3)
-
         pilots_only = torch.zeros_like(rg_type, dtype=torch.complex64)
         pilots_only[pilot_ind] = pilots
 
