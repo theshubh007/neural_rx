@@ -1274,17 +1274,18 @@ class NeuralPUSCHReceiver(nn.Module):
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
-
+            print("Flag: 3.1")
             # Convert PyTorch tensors to TensorFlow tensors
             y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
             active_tx_tf = tf.convert_to_tensor(active_tx.detach().cpu().numpy())
+            print("Flag: 3.2")
 
             # Estimate channel using TensorFlow tensors
             h_hat_tf = self.estimate_channel(y_tf, num_tx)
 
             # Convert the result back to PyTorch tensor if needed
             h_hat = torch.from_numpy(h_hat_tf.numpy()).to(y.device)
-
+            print("Flag: 3.3")
             # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
