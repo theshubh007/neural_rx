@@ -626,15 +626,14 @@ class ReadoutChEst(nn.Module):
     def __init__(self, num_rx_ant, num_units, layer_type="linear", dtype=torch.float32):
         super().__init__()
 
-        self.layer_type = layer_type
-        self.layers = nn.ModuleList()
-
-        if layer_type == "linear":
+        if layer_type in ["linear", "dense"]:
+            self.layers = nn.ModuleList()
             for n in num_units:
                 self.layers.append(nn.Linear(n, n, dtype=dtype))
                 self.layers.append(nn.ReLU())
             self.output_layer = nn.Linear(num_units[-1], 2 * num_rx_ant, dtype=dtype)
         elif layer_type == "conv1d":
+            self.layers = nn.ModuleList()
             for n in num_units:
                 self.layers.append(nn.Conv1d(n, n, kernel_size=1, dtype=dtype))
                 self.layers.append(nn.ReLU())
@@ -643,8 +642,10 @@ class ReadoutChEst(nn.Module):
             )
         else:
             raise NotImplementedError(
-                f"Layer type '{layer_type}' is not supported. Use 'linear' or 'conv1d'."
+                f"Layer type '{layer_type}' is not supported. Use 'linear', 'dense', or 'conv1d'."
             )
+
+        self.layer_type = layer_type
 
     def forward(self, s):
         z = s
@@ -791,8 +792,11 @@ class CGNN(nn.Module):
                 ]
             )
 
+        # self.readout_chest = ReadoutChEst(
+        #     num_rx_ant, num_units_readout, layer_type=layer_type_readout, dtype=dtype
+        # )
         self.readout_chest = ReadoutChEst(
-            num_rx_ant, num_units_readout, layer_type=layer_type_readout, dtype=dtype
+            num_rx_ant, num_units_readout, layer_type="linear", dtype=dtype
         )
 
     def forward(self, inputs):
