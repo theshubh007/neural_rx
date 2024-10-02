@@ -353,7 +353,6 @@ class E2E_Model(nn.Module):
                 mcs_ue_mask_torch[:, :, mcs]
                 .unsqueeze(-1)
                 .unsqueeze(-1)
-                .repeat(1, 1, 1, 1, 1)
                 .to(torch.complex64)
             )
 
@@ -361,8 +360,14 @@ class E2E_Model(nn.Module):
             x_tf = self._transmitters[mcs](b[idx])
             x_torch = torch.from_numpy(x_tf.numpy())
 
-            # Ensure _mcs_ue_mask has the same shape as x_torch
-            _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
+            # Adjust _mcs_ue_mask to match x_torch shape
+            _mcs_ue_mask = _mcs_ue_mask.expand(
+                x_torch.shape[0],
+                -1,
+                x_torch.shape[2],
+                x_torch.shape[3],
+                x_torch.shape[4],
+            )
 
             if x is None:
                 x = x_torch * _mcs_ue_mask
