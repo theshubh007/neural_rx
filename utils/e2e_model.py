@@ -33,6 +33,12 @@ class SionnaWrapper:
         return tf.convert_to_tensor(torch_tensor.detach().cpu().numpy())
 
 
+def torch_to_tf(tensor):
+    if isinstance(tensor, torch.Tensor):
+        return tf.convert_to_tensor(tensor.detach().cpu().numpy())
+    return tensor
+
+
 class E2E_Model(nn.Module):
     r"""E2E_Model(sys_parameters, training=False, return_tb_status=False, **kwargs)
     End-to-end model for system evaluation.
@@ -458,17 +464,23 @@ class E2E_Model(nn.Module):
                 max_ut_velocity=self._sys_parameters.max_ut_velocity,
                 indoor_probability=0.0,
             )  # disable indoor users
-            print("flag:19")
             self._sys_parameters.channel_model.set_topology(*topology)
+
+            # Convert PyTorch tensors to TensorFlow tensors
+            x_tf = torch_to_tf(x)
+            no_tf = torch_to_tf(no)
 
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
             print("flag:20")
-            y = self._channel([x, no])
+            y_tf = self._channel([x_tf, no_tf])
+            y = torch.from_numpy(y_tf.numpy()).to(x.device)
             h = torch.ones_like(y)  # simple AWGN channel
         else:
             print("flag:21")
-            y, h = self._channel([x, no])
+            y_tf, h_tf = self._channel([x_tf, no_tf])
+            y = torch.from_numpy(y_tf.numpy()).to(x.device)
+            h = torch.from_numpy(h_tf.numpy()).to(x.device)
 
         ###################################
         # Receiver
