@@ -1035,11 +1035,13 @@ class NeuralPUSCHReceiver(nn.Module):
         print("Flag: 0.2")
         # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
+            print("Flag: 0.31")
             self._precoding_mat = torch.tensor(
                 sys_parameters.transmitters[0]._precoder._w
             )
             print("Flag: 0.3")
         else:
+            print("Flag: 0.32")
             self._precoding_mat = torch.ones(
                 sys_parameters.max_num_tx,
                 sys_parameters.num_antenna_ports,
