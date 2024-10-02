@@ -159,7 +159,9 @@ class Parameters:
                 for pc in pcs:
                     pc.carrier.slot_number = slot_num
             pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
-            self.pilots.append(pilot_pattern.pilots)
+            # Convert TensorFlow tensor to PyTorch tensor
+        self.pilots.append(torch.from_numpy(pilot_pattern.pilots.numpy()))
+        # Now stack the PyTorch tensors
         self.pilots = torch.stack(self.pilots, dim=0)
         self.pilots = torch.tensor(self.pilots)
 
