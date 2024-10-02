@@ -11,6 +11,7 @@
 ##### E2E model for system evaluations #####
 
 import tensorflow as tf
+
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
 from sionna.utils import BinarySource, ebnodb2no  # , expand_to_rank
@@ -18,8 +19,6 @@ from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 import torch
 import torch.nn as nn
-import onnxruntime
-import tf2onnx
 
 
 # Combine transmit signals from all MCSs
