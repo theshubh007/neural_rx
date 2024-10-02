@@ -485,15 +485,17 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
-
+        print("flag:22")
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
         ):
+
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
+                print("flag:23")
                 b_hat, tb_crc_status = b_hat
             else:
                 tb_crc_status = None
@@ -501,6 +503,7 @@ class E2E_Model(nn.Module):
             # return b[0] and b_hat only for active DMRS ports
             # b only holds bits corresponding to MCS indices specified
             # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
+            print("flag:24")
             return self._mask_active_dmrs(
                 b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
             )
@@ -525,7 +528,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-
+            print("flag:25")
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
