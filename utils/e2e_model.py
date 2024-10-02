@@ -460,6 +460,7 @@ class E2E_Model(nn.Module):
             )  # disable indoor users
             self._sys_parameters.channel_model.set_topology(*topology)
 
+        print("flag:19")
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
             y = self._channel([x, no])
@@ -470,7 +471,7 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
-
+        print("flag:20")
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
