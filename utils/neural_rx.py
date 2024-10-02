@@ -15,7 +15,6 @@ import tensorflow as tf
 from tensorflow.keras import Model
 from sionna.utils import (
     flatten_dims,
-    flatten_last_dims,
     split_dim,
     expand_to_rank,
 )
@@ -969,75 +968,7 @@ class CGNNOFDM(nn.Module):
             self.bce = nn.BCEWithLogitsLoss(reduction="none")
             self.mse = nn.MSELoss(reduction="none")
 
-        # Calculate nearest_pilot_dist
-        rg_type = self.rg.build_type_grid()[:, 0]
-        pilot_ind = torch.where(rg_type == 1)
-        pilots = flatten_last_dims(self.rg.pilot_pattern.pilots, 3)
-        pilots_only = torch.zeros_like(rg_type, dtype=torch.complex64)
-        pilots_only[pilot_ind] = pilots
-
-        pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
-        pilot_ind = pilot_ind.numpy()
-
-        pilot_ind_sorted = [[] for _ in range(max_num_tx)]
-        for p_ind in pilot_ind:
-            tx_ind = p_ind[0]
-            re_ind = p_ind[1:]
-            pilot_ind_sorted[tx_ind].append(re_ind)
-        pilot_ind_sorted = np.array(pilot_ind_sorted)
-
-        pilots_dist_time = np.zeros(
-            [
-                max_num_tx,
-                self.rg.num_ofdm_symbols,
-                self.rg.fft_size,
-                pilot_ind_sorted.shape[1],
-            ]
-        )
-        pilots_dist_freq = np.zeros(
-            [
-                max_num_tx,
-                self.rg.num_ofdm_symbols,
-                self.rg.fft_size,
-                pilot_ind_sorted.shape[1],
-            ]
-        )
-
-        t_ind = np.arange(self.rg.num_ofdm_symbols)
-        f_ind = np.arange(self.rg.fft_size)
-
-        for tx_ind in range(max_num_tx):
-            for i, p_ind in enumerate(pilot_ind_sorted[tx_ind]):
-                pt = np.expand_dims(np.abs(p_ind[0] - t_ind), axis=1)
-                pilots_dist_time[tx_ind, :, :, i] = pt
-                pf = np.expand_dims(np.abs(p_ind[1] - f_ind), axis=0)
-                pilots_dist_freq[tx_ind, :, :, i] = pf
-
-        nearest_pilot_dist_time = np.min(pilots_dist_time, axis=-1)
-        nearest_pilot_dist_freq = np.min(pilots_dist_freq, axis=-1)
-
-        nearest_pilot_dist_time -= np.mean(
-            nearest_pilot_dist_time, axis=1, keepdims=True
-        )
-        std_ = np.std(nearest_pilot_dist_time, axis=1, keepdims=True)
-        nearest_pilot_dist_time = np.where(
-            std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
-        )
-
-        nearest_pilot_dist_freq -= np.mean(
-            nearest_pilot_dist_freq, axis=2, keepdims=True
-        )
-        std_ = np.std(nearest_pilot_dist_freq, axis=2, keepdims=True)
-        nearest_pilot_dist_freq = np.where(
-            std_ > 0.0, nearest_pilot_dist_freq / std_, nearest_pilot_dist_freq
-        )
-
-        nearest_pilot_dist = np.stack(
-            [nearest_pilot_dist_time, nearest_pilot_dist_freq], axis=-1
-        )
-        nearest_pilot_dist = torch.tensor(nearest_pilot_dist, dtype=torch.float32)
-
-        self._nearest_pilot_dist = nearest_pilot_dist.permute(0, 2, 1, 3)
+        self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
 
     def _compute_nearest_pilot_dist(self):
         # Compute and store the nearest pilot distance (positional encoding)
@@ -1046,7 +977,6 @@ class CGNNOFDM(nn.Module):
         pass
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
-        print("flag: CGNNOFDM forward")
         if self.training:
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
@@ -1056,19 +986,11 @@ class CGNNOFDM(nn.Module):
                     torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
                 )
             else:
-                print("flag:1")
                 mcs_ue_mask = mcs_ue_mask_eval
             mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-        print("flag:2")
-        # Check if active_tx is None and handle it
-        if active_tx is None:
-            # Use a default value or infer it from y
-            num_tx = y.shape[1] if len(y.shape) > 1 else 1
-            active_tx = torch.ones(y.shape[0], num_tx, device=y.device)
-        else:
-            num_tx = active_tx.shape[1]
-        # num_tx = active_tx.shape[1]
-        print("flag:3")
+
+        num_tx = active_tx.shape[1]
+
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
@@ -1078,15 +1000,15 @@ class CGNNOFDM(nn.Module):
         y = y.permute(0, 3, 2, 1)
         y = torch.cat([y.real, y.imag], dim=-1)
 
-        # pe = self.nearest_pilot_dist[:num_tx]
+        pe = self.nearest_pilot_dist[:num_tx]
 
         y = y.to(self.dtype)
-        # pe = pe.to(self.dtype)
+        pe = pe.to(self.dtype)
         if h_hat_init is not None:
             h_hat_init = h_hat_init.to(self.dtype)
         active_tx = active_tx.to(self.dtype)
 
-        llrs_, h_hats_ = self.cgnn([y, h_hat_init, active_tx, mcs_ue_mask])
+        llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
         indices = mcs_arr_eval
         llrs = []
@@ -1304,22 +1226,17 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        if isinstance(y, torch.Tensor):
-            # Convert PyTorch tensor to TensorFlow tensor
-            y = tf.convert_to_tensor(y.detach().cpu().numpy())
-
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y, tf.constant(1e-1)])
+            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
-            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
+            h_hat = h_hat.permute(0, 2, 4, 3, 1)
+            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
-
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
@@ -1357,21 +1274,8 @@ class NeuralPUSCHReceiver(nn.Module):
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
-            print("Flag: 3.1")
+            h_hat = self.estimate_channel(y, num_tx)
 
-            # Estimate channel using TensorFlow tensors
-            h_hat_tf = self.estimate_channel(y, num_tx)
-
-            print("Flag: 3.2")
-
-            # Convert TensorFlow tensor back to PyTorch tensor if needed
-            if h_hat_tf is not None:
-                h_hat = torch.from_numpy(h_hat_tf.numpy()).to(y.device)
-            else:
-                h_hat = None
-
-            print("Flag: 3.3")
-            # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],

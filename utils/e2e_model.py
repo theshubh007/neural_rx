@@ -460,31 +460,17 @@ class E2E_Model(nn.Module):
             )  # disable indoor users
             self._sys_parameters.channel_model.set_topology(*topology)
 
-        print("flag:19")
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
-            # Convert PyTorch tensors to TensorFlow tensors
-            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
-            no_tf = tf.convert_to_tensor(no)
-
-            y_tf = self._channel([x_tf, no_tf])
-            y = torch.from_numpy(y_tf.numpy()).to(x.device)
+            y = self._channel([x, no])
             h = torch.ones_like(y)  # simple AWGN channel
         else:
-            # Convert PyTorch tensors to TensorFlow tensors
-            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
-            no_tf = tf.convert_to_tensor(no)
-
-            y_tf, h_tf = self._channel([x_tf, no_tf])
-
-            # Convert TensorFlow tensors back to PyTorch tensors
-            y = torch.from_numpy(y_tf.numpy()).to(x.device)
-            h = torch.from_numpy(h_tf.numpy()).to(x.device)
+            y, h = self._channel([x, no])
 
         ###################################
         # Receiver
         ###################################
-        print("flag:20")
+
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
