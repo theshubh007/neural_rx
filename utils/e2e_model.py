@@ -32,6 +32,16 @@ def torch_to_tf(torch_tensor):
     return tf.convert_to_tensor(torch_tensor.cpu().detach().numpy())
 
 
+# Function to convert tensor to TensorFlow tensor
+def to_tf_tensor(tensor):
+    if isinstance(tensor, torch.Tensor):
+        return tf.convert_to_tensor(tensor.detach().cpu().numpy())
+    elif isinstance(tensor, tf.Tensor):
+        return tensor
+    else:
+        return tf.convert_to_tensor(tensor)
+
+
 class E2E_Model(nn.Module):
     r"""E2E_Model(sys_parameters, training=False, return_tb_status=False, **kwargs)
     End-to-end model for system evaluation.
@@ -529,8 +539,9 @@ class E2E_Model(nn.Module):
             print("flag4.45")
             print(type(x))
             # Convert PyTorch tensors to NumPy arrays, then to TensorFlow tensors
-            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
-            no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
+            # Convert tensors to TensorFlow tensors
+            x_tf = to_tf_tensor(x)
+            no_tf = to_tf_tensor(no)
             # y, h = self._channel([x, no])
             y, h = self._channel([x_tf, no_tf])
         print("flag4.5")
