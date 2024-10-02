@@ -269,6 +269,7 @@ class E2E_Model(nn.Module):
         mcs_arr_eval_idx=None,
         mcs_ue_mask=None,
     ):
+        print("E2E Model: Forward")
         if mcs_arr_eval_idx is None:
             mcs_arr_eval_idx = self._mcs_arr_eval_idx
 

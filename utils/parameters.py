@@ -13,6 +13,7 @@
 
 import numpy as np
 import configparser
+import torch
 import tensorflow as tf
 from os.path import exists
 from sionna.nr import (
@@ -31,40 +32,6 @@ from .impairments import FrequencyOffset
 
 
 class Parameters:
-    r"""
-    Simulation parameters
-
-    Parameters
-    ----------
-    config_name : str
-        name of the config file.
-
-    system : str
-        Receiver algorithm to be used.Must be one of:
-        * "nrx" : Neural receiver
-        * "baseline_lmmse_kbest" : LMMSE estimation and K-Best detection
-        * "baseline_perf_csi_kbest" : perfect CSI and K-Best detection
-        * "baseline_lmmse_lmmse" : LMMSE estimation and LMMSE equalization
-        * "baseline_lsnn_lmmse" : LS estimation/nn interpolation and LMMSE equalization
-        * "dummy" : stops after parameter import. Can be used only to parse the
-        config.
-
-    training: bool, False,
-        If True, training parameters are loaded. Otherwise, the evaluation
-        parameters are used.
-
-    verbose: bool, False
-        If True, additional information is printed during init.
-
-    compute_cov: bool, False
-        If True, the UMi channel model is loaded automatically to avoid
-        overfitting to TDL models.
-
-    num_tx_eval: int or None
-        If provided, the max number of users is limited to ``num_tx_eval``.
-        For this, the first DMRS ports are selected.
-    """
-
     def __init__(
         self,
         config_name,
@@ -74,47 +41,37 @@ class Parameters:
         compute_cov=False,
         num_tx_eval=None,
     ):
-
-        # check input for consistency
         assert isinstance(verbose, bool), "verbose must be bool."
         assert isinstance(training, bool), "training must be bool."
         assert isinstance(config_name, str), "config_name must be str."
         assert isinstance(system, str), "system must be str."
         assert isinstance(compute_cov, bool), "compute_cov must be bool."
-
         self.system = system
 
-        ###################################
-        ##### Load configuration file #####
-        ###################################
-
-        # create parser object and read config file
+        # Load configuration file
         fn = f"{config_name}"
         if exists(fn):
             config = configparser.RawConfigParser()
-            # automatically add fileformat if needed
-            config_name.replace(".cfg", "") + ".cfg"
+            config_name = config_name.replace(".cfg", "") + ".cfg"
             config.read(fn)
         else:
             raise FileNotFoundError("Unknown config file.")
 
-        # and import all parameters as attributes
+        # Import all parameters as attributes
         self.config_str = ""
         for section in config.sections():
             s = f"\n---- {section} ----- "
-            self.config_str += s + "<br />"  # add linebreak for Tensorboard
+            self.config_str += s + "\n"
             if verbose:
                 print(s)
             for option in config.options(section):
                 setattr(self, f"{option}", eval(config.get(section, option)))
-                s = f"{option}: {eval(config.get(section,option))}"
-                self.config_str += s + "<br />"  # add linebreak for Tensorboard
+                s = f"{option}: {eval(config.get(section, option))}"
+                self.config_str += s + "\n"
                 if verbose:
                     print(s)
 
         # Overwrite channel and PRBs in inference mode with "eval" parameters
-        # This allows to configure different parameters during training and
-        # evaluation.
         if not training:
             self.channel_type = self.channel_type_eval
             self.n_size_bwp = self.n_size_bwp_eval
@@ -126,50 +83,39 @@ class Parameters:
             if self.channel_type == "Dataset":
                 self.random_subsampling = self.random_subsampling_eval
 
-        # load only config parameters and return without initializing the rest
-        # of the system
+        # Load only config parameters and return without initializing the rest of the system
         if self.system == "dummy":
             return
 
-        #####################################
-        ##### Init PUSCH configurations #####
-        #####################################
-
-        # init PUSCHConfig
+        # Init PUSCH configurations
         carrier_config = CarrierConfig(
             n_cell_id=self.n_cell_id,
             cyclic_prefix=self.cyclic_prefix,
-            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),  # in kHz
+            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),
             n_size_grid=self.n_size_bwp,
             n_start_grid=self.n_start_grid,
             slot_number=self.slot_number,
             frame_number=self.frame_number,
         )
 
-        # init DMRSConfig
         pusch_dmrs_config = PUSCHDMRSConfig(
             config_type=self.dmrs_config_type,
             type_a_position=self.dmrs_type_a_position,
             additional_position=self.dmrs_additional_position,
             length=self.dmrs_length,
-            dmrs_port_set=self.dmrs_port_sets[0],  # first user
+            dmrs_port_set=self.dmrs_port_sets[0],
             n_scid=self.n_scid,
             num_cdm_groups_without_data=self.num_cdm_groups_without_data,
         )
 
         mcs_list = self.mcs_index
-        # generate pusch configs for all MCSs
-        self.pusch_configs = []  # self.pusch_configs[MCS_CONFIG][N_UE]
+        self.pusch_configs = []
         for mcs_list_idx in range(len(mcs_list)):
             self.pusch_configs.append([])
             mcs_index = mcs_list[mcs_list_idx]
-            # init TBConfig
             tb_config = TBConfig(
                 mcs_index=mcs_index, mcs_table=self.mcs_table, channel_type="PUSCH"
             )
-            # n_id=self.n_ids[0])
-
-            # first user PUSCH config
             pc = PUSCHConfig(
                 carrier_config=carrier_config,
                 pusch_dmrs_config=pusch_dmrs_config,
@@ -180,68 +126,49 @@ class Parameters:
                 tpmi=self.tpmi,
                 mapping_type=self.dmrs_mapping_type,
             )
-
-            # clone new PUSCHConfig for each additional user
             for idx, _ in enumerate(self.dmrs_port_sets):
-                p = pc.clone()  # generate new PUSCHConfig
-                # set user specific parts
+                p = pc.clone()
                 p.dmrs.dmrs_port_set = self.dmrs_port_sets[idx]
-                # The following parameters are derived from default.
-                # Comment lines if specific configuration is not required.
                 p.n_id = self.n_ids[idx]
                 p.dmrs.n_id = self.dmrs_nid[idx]
                 p.n_rnti = self.n_rntis[idx]
                 self.pusch_configs[mcs_list_idx].append(p)
 
-        ##############################
-        ##### Consistency checks #####
-        ##############################
-
-        # after training we can only reduce the number of iterations
+        # Consistency checks
         assert (
             self.num_nrx_iter_eval <= self.num_nrx_iter
         ), "num_nrx_iter_eval must be smaller or equal num_nrx_iter."
 
-        # for the evaluation, only activate num_tx_eval configs
+        # For evaluation, only activate num_tx_eval configs
         if not training:
-            # overwrite num_tx_eval if explicitly provided:
-            if num_tx_eval is not None:
-                num_tx_eval = num_tx_eval
-            else:  # if not provided use all available port sets
-                num_tx_eval = len(self.dmrs_port_sets)
-            self.max_num_tx = num_tx_eval  # non-varying users for evaluation
-            self.min_num_tx = num_tx_eval  # non-varying users for evaluation
+            num_tx_eval = (
+                num_tx_eval if num_tx_eval is not None else len(self.dmrs_port_sets)
+            )
+            self.max_num_tx = num_tx_eval
+            self.min_num_tx = num_tx_eval
+            for mcs_list_idx in range(len(mcs_list)):
+                self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
+                    : self.max_num_tx
+                ]
+            print(f"Evaluating the first {self.max_num_tx} port sets.")
 
-        for mcs_list_idx in range(len(mcs_list)):
-            self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
-                : self.max_num_tx
-            ]
-        print(f"Evaluating the first {self.max_num_tx} port sets.")
-
-        ##################################
-        ##### Configure Transmitters #####
-        ##################################
-
-        # Generate and store DMRS for all slot numbers
+        # Configure Transmitters
         self.pilots = []
         for slot_num in range(carrier_config.num_slots_per_frame):
             for pcs in self.pusch_configs:
                 for pc in pcs:
                     pc.carrier.slot_number = slot_num
-            # only generate pilot pattern for first MCS's PUSCH config, as
-            # pilots are independent from MCS index
             pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
             self.pilots.append(pilot_pattern.pilots)
-        self.pilots = tf.stack(self.pilots, axis=0)
-        self.pilots = tf.constant(self.pilots)
+        self.pilots = torch.stack(self.pilots, dim=0)
+        self.pilots = torch.tensor(self.pilots)
+
         for pcs in self.pusch_configs:
             for pc in pcs:
                 pc.carrier.slot_number = self.slot_number
 
-        # transmitter is a list of PUSCHTransmitters, one for each MCS
         self.transmitters = []
         for mcs_list_idx in range(len(mcs_list)):
-            # and init transmitter
             self.transmitters.append(
                 PUSCHTransmitter(
                     self.pusch_configs[mcs_list_idx],
@@ -250,55 +177,38 @@ class Parameters:
                     verbose=self.verbose,
                 )
             )
-
-            # support end-to-end learning / custom constellations
-            # see https://arxiv.org/pdf/2009.05261 for details
-            if self.custom_constellation:  # trainable constellations
+            if self.custom_constellation:
                 print("Activating trainable custom constellations.")
                 self.transmitters[mcs_list_idx]._mapper.constellation.trainable = True
-            # Center constellations. This could be also deactivated for more
-            # degrees of freedom.
-            self.transmitters[mcs_list_idx]._mapper.constellation.center = True
+                self.transmitters[mcs_list_idx]._mapper.constellation.center = True
 
-        # chest will fail if we use explicit masking of pilots.
         if self.mask_pilots and self.initial_chest in ("ls", "nn"):
             print("Warning: initial_chest will fail with masked pilots.")
 
-        # StreamManagement required for KBestDetector
-        self.sm = StreamManagement(np.ones([1, self.max_num_tx], int), 1)
+        self.sm = StreamManagement(torch.ones(1, self.max_num_tx, dtype=torch.int32), 1)
 
-        ##############################
-        ##### Initialize Channel #####
-        ##############################
+        # Initialize Channel
+        if compute_cov and self.channel_type not in ("UMi", "UMa"):
+            print("Setting channel type to UMi for covariance computation.")
+            self.channel_type = "UMi"
 
-        # always use UMi to calculate covariance matrix
-        if compute_cov:
-            if self.channel_type not in ("UMi", "UMa"):  # use UMa if selected
-                print("Setting channel type to UMi for covariance computation.")
-                self.channel_type = "UMi"
-
-        # Sanity check
         if (
             self.channel_type in ("DoubleTDLlow", "DoubleTDLmedium", "DoubleTDLhigh")
             and self.max_num_tx == 1
         ):
             print(
-                "Warning: SelectedDoubleTDL model only defined for 2 "
-                "users. Selecting TDL-B100 instead."
+                "Warning: SelectedDoubleTDL model only defined for 2 users. Selecting TDL-B100 instead."
             )
             self.channel_type = "TDL-B100"
 
-        # Initialize channel
-        # Remark: new channel models can be added here
         if self.channel_type in ("UMi", "UMa"):
-            if self.num_rx_antennas == 1:  # ignore polarization for single antenna
+            if self.num_rx_antennas == 1:
                 print("Using vertical polarization for single antenna setup.")
                 num_cols_per_panel = 1
                 num_rows_per_panel = 1
                 polarization = "single"
                 polarization_type = "V"
             else:
-                # we use a ULA array to be aligned with TDL models
                 num_cols_per_panel = self.num_rx_antennas // 2
                 num_rows_per_panel = 1
                 polarization = "dual"
@@ -345,9 +255,7 @@ class Parameters:
 
             self.channel = OFDMChannel(
                 channel_model=self.channel_model,
-                resource_grid=self.transmitters[
-                    0
-                ]._resource_grid,  # resource grid is independent of MCS
+                resource_grid=self.transmitters[0]._resource_grid,
                 add_awgn=True,
                 normalize_channel=self.channel_norm,
                 return_channel=True,
@@ -365,13 +273,12 @@ class Parameters:
             )
             self.channel = OFDMChannel(
                 tdl,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 add_awgn=True,
                 normalize_channel=self.channel_norm,
                 return_channel=True,
             )
+
         elif self.channel_type == "TDL-C300":
             tdl = TDL(
                 model="C300",
@@ -384,42 +291,34 @@ class Parameters:
             )
             self.channel = OFDMChannel(
                 tdl,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 add_awgn=True,
                 normalize_channel=self.channel_norm,
                 return_channel=True,
             )
-        # DoubleTDL for evaluation
+
         elif self.channel_type == "DoubleTDLlow":
             self.channel = DoubleTDLChannel(
                 self.carrier_frequency,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 correlation="low",
                 num_tx_ant=pc.num_antenna_ports,
                 norm_channel=self.channel_norm,
             )
-        # DoubleTDL for evaluation
+
         elif self.channel_type == "DoubleTDLmedium":
             self.channel = DoubleTDLChannel(
                 self.carrier_frequency,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 correlation="medium",
                 num_tx_ant=pc.num_antenna_ports,
                 norm_channel=self.channel_norm,
             )
-        # DoubleTDL for evaluation
+
         elif self.channel_type == "DoubleTDLhigh":
             self.channel = DoubleTDLChannel(
                 self.carrier_frequency,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 correlation="high",
                 num_tx_ant=pc.num_antenna_ports,
                 norm_channel=self.channel_norm,
@@ -431,16 +330,14 @@ class Parameters:
         elif self.channel_type == "Dataset":
             channel_model = DatasetChannel(
                 "../data/" + self.tfrecord_filename,
-                max_num_examples=-1,  # loads entire dataset
+                max_num_examples=-1,
                 training=training,
                 num_tx=self.max_num_tx,
                 random_subsampling=self.random_subsampling,
             )
             self.channel = OFDMChannel(
                 channel_model,
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 add_awgn=True,
                 normalize_channel=self.channel_norm,
                 return_channel=True,
@@ -452,17 +349,13 @@ class Parameters:
         # Hardware impairments
         if self.cfo_offset_ppm > 0:
             offset = self.carrier_frequency / 1e6 * self.cfo_offset_ppm
-            max_rel_offset = (
-                offset / self.transmitters[0].resource_grid.bandwidth
-            )  # resource grid and bandwidth is independent of MCS
+            max_rel_offset = offset / self.transmitters[0].resource_grid.bandwidth
             self.frequency_offset = FrequencyOffset(
                 max_rel_offset,
                 "freq",
-                self.transmitters[
-                    0
-                ].resource_grid,  # resource grid is independent of MCS
+                self.transmitters[0].resource_grid,
                 constant_offset=(not training),
-            )  # fix offset for evaluation
+            )
         else:
             self.frequency_offset = None
 
@@ -482,11 +375,11 @@ class Parameters:
                 )
 
             self.space_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_space_cov_mat.npy"), tf.complex64
+                np.load(f"../weights/{self.label}_space_cov_mat.npy"), torch.complex64
             )
             self.time_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_time_cov_mat.npy"), tf.complex64
+                np.load(f"../weights/{self.label}_time_cov_mat.npy"), torch.complex64
             )
             self.freq_cov_mat = tf.cast(
-                np.load(f"../weights/{self.label}_freq_cov_mat.npy"), tf.complex64
+                np.load(f"../weights/{self.label}_freq_cov_mat.npy"), torch.complex64
             )
