@@ -458,13 +458,16 @@ class E2E_Model(nn.Module):
                 max_ut_velocity=self._sys_parameters.max_ut_velocity,
                 indoor_probability=0.0,
             )  # disable indoor users
+            print("flag:19")
             self._sys_parameters.channel_model.set_topology(*topology)
 
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
+            print("flag:20")
             y = self._channel([x, no])
             h = torch.ones_like(y)  # simple AWGN channel
         else:
+            print("flag:21")
             y, h = self._channel([x, no])
 
         ###################################
