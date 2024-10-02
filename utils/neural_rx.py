@@ -12,15 +12,10 @@
 import torch
 import torch.nn as nn
 import tensorflow as tf
-import numpy as np
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
-from tensorflow.nn import relu
 from sionna.utils import (
     flatten_dims,
     split_dim,
-    flatten_last_dims,
-    insert_dims,
     expand_to_rank,
 )
 from sionna.ofdm import ResourceGridDemapper
@@ -969,6 +964,42 @@ class CGNNOFDM(nn.Module):
             return llrs[-1][0], h_hats[-1]
 
 
+class TBEncoderWrapper(nn.Module):
+    def __init__(self, tb_encoder):
+        super().__init__()
+        self.tb_encoder = tb_encoder
+
+    def forward(self, x):
+        # Convert PyTorch tensor to NumPy array
+        x_np = x.detach().cpu().numpy()
+
+        # Use Sionna's TBEncoder
+        y_tf = self.tb_encoder(x_np)
+
+        # Convert TensorFlow tensor back to PyTorch tensor
+        y = torch.from_numpy(y_tf.numpy()).to(x.device)
+
+        return y
+
+
+class TBDecoderWrapper(nn.Module):
+    def __init__(self, tb_decoder):
+        super().__init__()
+        self.tb_decoder = tb_decoder
+
+    def forward(self, x):
+        # Convert PyTorch tensor to NumPy array
+        x_np = x.detach().cpu().numpy()
+
+        # Use Sionna's TBDecoder
+        y_tf = self.tb_decoder(x_np)
+
+        # Convert TensorFlow tensor back to PyTorch tensor
+        y = torch.from_numpy(y_tf.numpy()).to(x.device)
+
+        return y
+
+
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False):
         super().__init__()
@@ -982,13 +1013,17 @@ class NeuralPUSCHReceiver(nn.Module):
 
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
-                sys_parameters.transmitters[mcs_list_idx]._tb_encoder
+                TBEncoderWrapper(
+                    self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
+                )
             )
             self._tb_decoders.append(
-                TBDecoder(
-                    self._tb_encoders[mcs_list_idx],
-                    num_bp_iter=sys_parameters.num_bp_iter,
-                    cn_type=sys_parameters.cn_type,
+                TBDecoderWrapper(
+                    TBDecoder(
+                        self._tb_encoders[mcs_list_idx].tb_encoder,
+                        num_bp_iter=sys_parameters.num_bp_iter,
+                        cn_type=sys_parameters.cn_type,
+                    )
                 )
             )
 
