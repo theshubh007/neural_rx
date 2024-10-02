@@ -966,8 +966,8 @@ class CGNNOFDM(nn.Module):
         self.rg_demapper = ResourceGridDemapper(self.rg, sys_parameters.sm)
 
         if training:
-            self.bce = nn.BCEWithLogitsLoss(reduction='none')
-            self.mse = nn.MSELoss(reduction='none')
+            self.bce = nn.BCEWithLogitsLoss(reduction="none")
+            self.mse = nn.MSELoss(reduction="none")
 
         # Calculate nearest_pilot_dist
         rg_type = self.rg.build_type_grid()[:, 0]
@@ -986,14 +986,22 @@ class CGNNOFDM(nn.Module):
             pilot_ind_sorted[tx_ind].append(re_ind)
         pilot_ind_sorted = np.array(pilot_ind_sorted)
 
-        pilots_dist_time = np.zeros([max_num_tx,
-                                    self.rg.num_ofdm_symbols,
-                                    self.rg.fft_size,
-                                    pilot_ind_sorted.shape[1]])
-        pilots_dist_freq = np.zeros([max_num_tx,
-                                    self.rg.num_ofdm_symbols,
-                                    self.rg.fft_size,
-                                    pilot_ind_sorted.shape[1]])
+        pilots_dist_time = np.zeros(
+            [
+                max_num_tx,
+                self.rg.num_ofdm_symbols,
+                self.rg.fft_size,
+                pilot_ind_sorted.shape[1],
+            ]
+        )
+        pilots_dist_freq = np.zeros(
+            [
+                max_num_tx,
+                self.rg.num_ofdm_symbols,
+                self.rg.fft_size,
+                pilot_ind_sorted.shape[1],
+            ]
+        )
 
         t_ind = np.arange(self.rg.num_ofdm_symbols)
         f_ind = np.arange(self.rg.fft_size)
@@ -1008,21 +1016,25 @@ class CGNNOFDM(nn.Module):
         nearest_pilot_dist_time = np.min(pilots_dist_time, axis=-1)
         nearest_pilot_dist_freq = np.min(pilots_dist_freq, axis=-1)
 
-        nearest_pilot_dist_time -= np.mean(nearest_pilot_dist_time, axis=1, keepdims=True)
+        nearest_pilot_dist_time -= np.mean(
+            nearest_pilot_dist_time, axis=1, keepdims=True
+        )
         std_ = np.std(nearest_pilot_dist_time, axis=1, keepdims=True)
-        nearest_pilot_dist_time = np.where(std_ > 0.,
-                                        nearest_pilot_dist_time / std_,
-                                        nearest_pilot_dist_time)
+        nearest_pilot_dist_time = np.where(
+            std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
+        )
 
-        nearest_pilot_dist_freq -= np.mean(nearest_pilot_dist_freq, axis=2, keepdims=True)
+        nearest_pilot_dist_freq -= np.mean(
+            nearest_pilot_dist_freq, axis=2, keepdims=True
+        )
         std_ = np.std(nearest_pilot_dist_freq, axis=2, keepdims=True)
-        nearest_pilot_dist_freq = np.where(std_ > 0.,
-                                        nearest_pilot_dist_freq / std_,
-                                        nearest_pilot_dist_freq)
+        nearest_pilot_dist_freq = np.where(
+            std_ > 0.0, nearest_pilot_dist_freq / std_, nearest_pilot_dist_freq
+        )
 
-        nearest_pilot_dist = np.stack([nearest_pilot_dist_time,
-                                    nearest_pilot_dist_freq],
-                                    axis=-1)
+        nearest_pilot_dist = np.stack(
+            [nearest_pilot_dist_time, nearest_pilot_dist_freq], axis=-1
+        )
         nearest_pilot_dist = torch.tensor(nearest_pilot_dist, dtype=torch.float32)
 
         self._nearest_pilot_dist = nearest_pilot_dist.permute(0, 2, 1, 3)
@@ -1032,7 +1044,6 @@ class CGNNOFDM(nn.Module):
         # This method should be implemented to match the TensorFlow version's functionality
         # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
         pass
-        
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
         if self.training:
@@ -1058,15 +1069,15 @@ class CGNNOFDM(nn.Module):
         y = y.permute(0, 3, 2, 1)
         y = torch.cat([y.real, y.imag], dim=-1)
 
-        pe = self.nearest_pilot_dist[:num_tx]
+        # pe = self.nearest_pilot_dist[:num_tx]
 
         y = y.to(self.dtype)
-        pe = pe.to(self.dtype)
+        # pe = pe.to(self.dtype)
         if h_hat_init is not None:
             h_hat_init = h_hat_init.to(self.dtype)
         active_tx = active_tx.to(self.dtype)
 
-        llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
+        llrs_, h_hats_ = self.cgnn([y, h_hat_init, active_tx, mcs_ue_mask])
 
         indices = mcs_arr_eval
         llrs = []
