@@ -27,18 +27,6 @@ def expand_to_rank(tensor, target_rank, axis=-1):
     return tensor
 
 
-# # Create a PyTorch wrapper for ONNX model
-# class ONNXWrapper(nn.Module):
-#     def __init__(self, ort_session):
-#         super().__init__()
-#         self.ort_session = ort_session
-
-#     def forward(self, x):
-#         ort_inputs = {self.ort_session.get_inputs()[0].name: x.detach().cpu().numpy()}
-#         ort_outputs = self.ort_session.run(None, ort_inputs)
-#         return torch.from_numpy(ort_outputs[0])
-
-
 class E2E_Model(nn.Module):
     r"""E2E_Model(sys_parameters, training=False, return_tb_status=False, **kwargs)
     End-to-end model for system evaluation.
@@ -478,7 +466,7 @@ class E2E_Model(nn.Module):
         # Rate adjusted SNR; for e2e learning non-rate adjusted is sometimes
         # preferred as pilotless communications changes the rate.
         if self._sys_parameters.ebno:
-
+            print("flag4.1")
             # If pilot masking is used (for e2e), we account for the resulting
             # rate shift the assumption is that the empty REs are not
             # considered during transmission
@@ -498,13 +486,14 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._target_coderate,
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
-
+            print("flag4.2")
         else:
             # ebno_db is actually SNR when self._sys_parameters.ebno==False
             no = 10 ** (-ebno_db / 10)
-
+            print("flag4.3")
         # Update topology only required for 3GPP UMi/UMa models
         if self._sys_parameters.channel_type in ("UMi", "UMa"):
+            print("flag4.4")
             if self._sys_parameters.channel_type == "UMi":
                 ch_type = "umi"
             else:
@@ -526,7 +515,7 @@ class E2E_Model(nn.Module):
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
             y, h = self._channel([x, no])
-        print("flag4")
+        print("flag4.5")
         ###################################
         # Receiver
         ###################################
@@ -540,6 +529,7 @@ class E2E_Model(nn.Module):
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
                 b_hat, tb_crc_status = b_hat
+
             else:
                 tb_crc_status = None
 
