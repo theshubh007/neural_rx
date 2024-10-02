@@ -1074,7 +1074,9 @@ class NeuralPUSCHReceiver(nn.Module):
         )
         print("Flag: 0.5")
         rg_type = rg.build_type_grid()[:, 0]
-        pilot_ind = torch.where(rg_type == 1)
+        # Convert TensorFlow tensor to NumPy array, then to PyTorch tensor
+        rg_type_torch = torch.from_numpy(rg_type.numpy())
+        pilot_ind = torch.where(rg_type_torch == 1)
         self._pilot_ind = pilot_ind[0]
 
         # Layer demappers
