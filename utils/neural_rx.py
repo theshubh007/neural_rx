@@ -18,6 +18,7 @@ from sionna.utils import (
     split_dim,
     expand_to_rank,
 )
+import numpy as np
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
@@ -1036,9 +1037,20 @@ class NeuralPUSCHReceiver(nn.Module):
         # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
             print("Flag: 0.31")
-            self._precoding_mat = torch.tensor(
-                sys_parameters.transmitters[0]._precoder._w
-            )
+            precoder_w = sys_parameters.transmitters[0]._precoder._w
+            if isinstance(precoder_w, (tf.Tensor, np.ndarray)):
+                # If it's already a tensor or numpy array, convert to PyTorch tensor
+                self._precoding_mat = torch.tensor(
+                    precoder_w.numpy()
+                    if isinstance(precoder_w, tf.Tensor)
+                    else precoder_w
+                )
+            elif np.isscalar(precoder_w):
+                # If it's a scalar, create a 1x1 tensor
+                self._precoding_mat = torch.tensor([[precoder_w]])
+            else:
+                # If it's something else (like a list), convert to tensor normally
+                self._precoding_mat = torch.tensor(precoder_w)
             print("Flag: 0.3")
         else:
             print("Flag: 0.32")
