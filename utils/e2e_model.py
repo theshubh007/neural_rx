@@ -20,6 +20,7 @@ from .neural_rx import NeuralPUSCHReceiver
 import numpy as np
 import torch
 from torch import nn
+from sionna.channel import OFDMChannel
 
 
 class SionnaWrapper:
@@ -158,7 +159,13 @@ class E2E_Model(nn.Module):
         ###################################
         # Channel
         ###################################
-        self._channel = sys_parameters.channel
+        self._channel = OFDMChannel(
+            sys_parameters.channel_model,
+            sys_parameters.transmitters[0]._resource_grid,
+            add_awgn=True,
+            normalize_channel=sys_parameters.channel_norm,
+            return_channel=True,
+        )
 
         ###################################
         # Receiver
@@ -403,15 +410,18 @@ class E2E_Model(nn.Module):
         # Rate adjusted SNR; for e2e learning non-rate adjusted is sometimes
         # preferred as pilotless communications changes the rate.
         if self._sys_parameters.ebno:
+            print("flag:12")
 
             # If pilot masking is used (for e2e), we account for the resulting
             # rate shift the assumption is that the empty REs are not
             # considered during transmission
             if self._sys_parameters.mask_pilots:
+                print("flag:13")
                 tx = self._sys_parameters.transmitters[0]
                 num_pilots = float(tx._resource_grid.num_pilot_symbols)
                 num_res = float(tx._resource_grid.num_resource_elements)
                 ebno_db -= 10.0 * log10(1.0 - num_pilots / num_res)
+                print("flag:14")
                 # Remark: this also counts empty REs from oder CDM groups
                 # (e.g., used for other DMRS ports).
                 # In the current e2e config; this case does not occur.
@@ -423,17 +433,22 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._target_coderate,
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
+            print("flag:15")
 
         else:
+            print("flag:16")
             # ebno_db is actually SNR when self._sys_parameters.ebno==False
             no = 10 ** (-ebno_db / 10)
 
         # Update topology only required for 3GPP UMi/UMa models
         if self._sys_parameters.channel_type in ("UMi", "UMa"):
             if self._sys_parameters.channel_type == "UMi":
+                print("flag:17")
                 ch_type = "umi"
             else:
                 ch_type = "uma"
+
+            print("flag:18")
             # Topology update only required for 3GPP pilot patterns
             topology = gen_single_sector_topology(
                 batch_size,
