@@ -349,12 +349,7 @@ class E2E_Model(nn.Module):
 
         x = None
         for idx, mcs in enumerate(mcs_arr_eval):
-            _mcs_ue_mask = (
-                mcs_ue_mask_torch[:, :, mcs]
-                .unsqueeze(-1)
-                .unsqueeze(-1)
-                .to(torch.complex64)
-            )
+            _mcs_ue_mask = mcs_ue_mask_torch[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
 
             # Assuming self._transmitters[mcs] is a Sionna component
             x_tf = self._transmitters[mcs](b[idx])
@@ -362,12 +357,9 @@ class E2E_Model(nn.Module):
 
             # Adjust _mcs_ue_mask to match x_torch shape
             _mcs_ue_mask = _mcs_ue_mask.expand(
-                x_torch.shape[0],
-                -1,
-                x_torch.shape[2],
-                x_torch.shape[3],
-                x_torch.shape[4],
+                x_torch.shape[0], x_torch.shape[1], 1, 1, 1
             )
+            _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
 
             if x is None:
                 x = x_torch * _mcs_ue_mask
