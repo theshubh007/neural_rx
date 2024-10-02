@@ -498,11 +498,13 @@ class E2E_Model(nn.Module):
 
         # Update topology only required for 3GPP UMi/UMa models
         if self._sys_parameters.channel_type in ("UMi", "UMa"):
-            print("flag4.4")
+
             if self._sys_parameters.channel_type == "UMi":
                 ch_type = "umi"
+                print("flag4.41")
             else:
                 ch_type = "uma"
+                print("flag4.2")
             # Topology update only required for 3GPP pilot patterns
             topology = gen_single_sector_topology(
                 batch_size,
@@ -512,32 +514,18 @@ class E2E_Model(nn.Module):
                 max_ut_velocity=self._sys_parameters.max_ut_velocity,
                 indoor_probability=0.0,
             )  # disable indoor users
+            print("flag4.43")
             self._sys_parameters.channel_model.set_topology(*topology)
+            print("flag4.44")
 
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
-            # Convert PyTorch tensors to TensorFlow tensors
-            x_tf = torch_to_tf(x)
-            no_tf = torch_to_tf(no)
-
-            # Apply channel using TensorFlow tensors
-            y_tf = self._channel([x_tf, no_tf])
-
-            # Convert result back to PyTorch tensor
-            y = torch.from_numpy(y_tf.numpy()).to(x.device)
+            print("flag4.45")
+            y = self._channel([x, no])
+            print("flag4.46")
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
-            # Convert PyTorch tensors to TensorFlow tensors
-            x_tf = torch_to_tf(x)
-            no_tf = torch_to_tf(no)
-
-            # Apply channel using TensorFlow tensors
-            y_tf, h_tf = self._channel([x_tf, no_tf])
-
-            # Convert results back to PyTorch tensors
-            y = torch.from_numpy(y_tf.numpy()).to(x.device)
-            h = torch.from_numpy(h_tf.numpy()).to(x.device)
-
+            y, h = self._channel([x, no])
         print("flag4.5")
         ###################################
         # Receiver
