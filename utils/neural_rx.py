@@ -370,10 +370,7 @@ class AggregateUserStates(nn.Module):
     def __init__(self, d_s, num_units, layer_type="linear", dtype=torch.float32):
         super().__init__()
 
-        self.layer_type = layer_type
-        print(f"Layer type: {layer_type}")
-
-        if layer_type == "linear":
+        if layer_type in ["linear", "dense"]:
             self.hidden_layers = nn.ModuleList(
                 [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
             )
@@ -387,10 +384,11 @@ class AggregateUserStates(nn.Module):
             )
         else:
             raise NotImplementedError(
-                f"Layer type '{layer_type}' is not supported. Use 'linear' or 'conv1d'."
+                f"Layer type '{layer_type}' is not supported. Use 'linear', 'dense', or 'conv1d'."
             )
 
         self.activation = nn.ReLU()
+        self.layer_type = layer_type
 
     def forward(self, inputs):
         s, active_tx = inputs
