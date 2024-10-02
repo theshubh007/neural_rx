@@ -342,33 +342,37 @@ class E2E_Model(nn.Module):
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
+
         # Convert TensorFlow tensors to PyTorch tensors
         mcs_ue_mask_torch = torch.from_numpy(mcs_ue_mask.numpy())
         active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
 
-        _mcs_ue_mask = (
-            mcs_ue_mask_torch[:, :, mcs_arr_eval[0]]
-            .unsqueeze(-1)
-            .unsqueeze(-1)
-            .repeat(1, 1, 1, 1, 1)
-            .to(torch.complex64)
-        )
-        # Assuming self._transmitters[mcs_arr_eval[0]] is a Sionna component
-        x_tf = self._transmitters[mcs_arr_eval[0]](b[0])
-        x = torch.from_numpy(x_tf.numpy()) * _mcs_ue_mask
-
-        for idx in range(1, len(mcs_arr_eval)):
+        x = None
+        for idx, mcs in enumerate(mcs_arr_eval):
             _mcs_ue_mask = (
-                mcs_ue_mask_torch[:, :, mcs_arr_eval[idx]]
+                mcs_ue_mask_torch[:, :, mcs]
                 .unsqueeze(-1)
                 .unsqueeze(-1)
                 .repeat(1, 1, 1, 1, 1)
                 .to(torch.complex64)
             )
-            x_tf = self._transmitters[mcs_arr_eval[idx]](b[idx])
-            x += torch.from_numpy(x_tf.numpy()) * _mcs_ue_mask
 
+            # Assuming self._transmitters[mcs] is a Sionna component
+            x_tf = self._transmitters[mcs](b[idx])
+            x_torch = torch.from_numpy(x_tf.numpy())
+
+            # Ensure _mcs_ue_mask has the same shape as x_torch
+            _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
+
+            if x is None:
+                x = x_torch * _mcs_ue_mask
+            else:
+                x += x_torch * _mcs_ue_mask
+
+        # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
+        a_tx = a_tx.expand_as(x)
+
         x = torch.mul(x, a_tx.to(torch.complex64))
 
         ###################################
