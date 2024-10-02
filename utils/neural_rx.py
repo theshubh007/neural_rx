@@ -976,6 +976,15 @@ class CGNNOFDM(nn.Module):
         # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
         pass
 
+    def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
+        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        for tx in range(num_tx):
+            for sc in range(num_subcarriers):
+                for sym in range(num_ofdm_symbols):
+                    pe[tx, sc, sym, 0] = sc / num_subcarriers
+                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
+        return pe
+
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
         if self.training:
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
@@ -990,6 +999,8 @@ class CGNNOFDM(nn.Module):
             mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
         num_tx = active_tx.shape[1]
+        num_subcarriers = y.shape[1]
+        num_ofdm_symbols = y.shape[2]
 
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
@@ -1000,7 +1011,11 @@ class CGNNOFDM(nn.Module):
         y = y.permute(0, 3, 2, 1)
         y = torch.cat([y.real, y.imag], dim=-1)
 
-        pe = self.nearest_pilot_dist[:num_tx]
+        # Compute positional encoding
+        pe = self._compute_positional_encoding(
+            num_tx, num_subcarriers, num_ofdm_symbols
+        )
+        pe = pe.to(self.dtype).to(y.device)
 
         y = y.to(self.dtype)
         pe = pe.to(self.dtype)
