@@ -21,6 +21,7 @@ from sionna.utils import (
 import numpy as np
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
+from sionna.nr import LayerDemapper as SionnaLayerDemapper
 
 
 class StateInit(nn.Module):
@@ -1001,6 +1002,24 @@ class TBDecoderWrapper(nn.Module):
         return y
 
 
+class LayerDemapperWrapper(nn.Module):
+    def __init__(self, layer_mapper, num_bits_per_symbol):
+        super().__init__()
+        self.layer_demapper = SionnaLayerDemapper(layer_mapper, num_bits_per_symbol)
+
+    def forward(self, x):
+        # Convert PyTorch tensor to NumPy array
+        x_np = x.detach().cpu().numpy()
+
+        # Use Sionna's LayerDemapper
+        y_tf = self.layer_demapper(x_np)
+
+        # Convert TensorFlow tensor back to PyTorch tensor
+        y = torch.from_numpy(y_tf.numpy()).to(x.device)
+
+        return y
+
+
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False):
         print("Flag: Neural receiver -> __init__")
@@ -1083,7 +1102,7 @@ class NeuralPUSCHReceiver(nn.Module):
         self._layer_demappers = nn.ModuleList()
         for mcs_list_idx in range(self._num_mcss_supported):
             self._layer_demappers.append(
-                LayerDemapper(
+                LayerDemapperWrapper(
                     sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
                     sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
                 )
