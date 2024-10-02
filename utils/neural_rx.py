@@ -974,39 +974,37 @@ class CGNNOFDM(nn.Module):
     def _compute_nearest_pilot_dist(self):
         rg = self.sys_parameters.transmitters[0]._resource_grid
         pilot_pattern = rg.pilot_pattern
-        num_subcarriers = rg.num_resource_elements
-        num_ofdm_symbols = rg.num_ofdm_symbols
+        num_subcarriers = rg.num_effective_subcarriers
+        num_ofdm_symbols = rg.num_ofdm_symbols  # Changed from num_ofdm_symbols_per_slot
 
         pilot_indices = pilot_pattern.pilot_indices
 
-        subcarrier_indices = torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
-        symbol_indices = torch.arange(num_ofdm_symbols).unsqueeze(0).expand(num_subcarriers, -1)
+        subcarrier_indices = (
+            torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
+        )
+        symbol_indices = (
+            torch.arange(num_ofdm_symbols).unsqueeze(0).expand(num_subcarriers, -1)
+        )
 
-        nearest_pilot_dist = torch.zeros(self.max_num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        nearest_pilot_dist = torch.zeros(
+            self.max_num_tx, num_subcarriers, num_ofdm_symbols, 2
+        )
 
         for tx in range(self.max_num_tx):
-            tx_pilot_indices = torch.tensor(pilot_indices[tx])
-
-            # Create a mask for pilot positions
-            pilot_mask = torch.zeros(num_subcarriers, num_ofdm_symbols, dtype=torch.bool)
-            pilot_mask[tx_pilot_indices[:, 0], tx_pilot_indices[:, 1]] = True
-
-            # Compute distances to all pilots
-            distances = torch.cdist(torch.stack([subcarrier_indices, symbol_indices], dim=-1).reshape(-1, 2), 
-                                    tx_pilot_indices.float())
-
-            # Find the nearest pilot
-            min_distances, min_indices = torch.min(distances, dim=1)
-            nearest_pilots = tx_pilot_indices[min_indices]
-
-            # Compute the distance to the nearest pilot
-            dist_to_nearest = torch.stack([subcarrier_indices.reshape(-1) - nearest_pilots[:, 0],
-                                        symbol_indices.reshape(-1) - nearest_pilots[:, 1]], dim=-1)
-
-            # Set the distance to zero for actual pilot positions
-            dist_to_nearest[pilot_mask.reshape(-1)] = 0
-
-            nearest_pilot_dist[tx] = dist_to_nearest.reshape(num_subcarriers, num_ofdm_symbols, 2)
+            tx_pilot_indices = pilot_indices[tx]
+            for sc in range(num_subcarriers):
+                for sym in range(num_ofdm_symbols):
+                    if [sc, sym] in tx_pilot_indices:
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([0.0, 0.0])
+                    else:
+                        distances = torch.sqrt(
+                            (subcarrier_indices - sc) ** 2 + (symbol_indices - sym) ** 2
+                        )
+                        min_distance, min_index = torch.min(distances, dim=None)
+                        nearest_pilot = tx_pilot_indices[min_index]
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor(
+                            [sc - nearest_pilot[0], sym - nearest_pilot[1]]
+                        ).float()
 
         return nearest_pilot_dist
 
