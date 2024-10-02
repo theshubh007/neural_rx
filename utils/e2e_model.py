@@ -521,11 +521,13 @@ class E2E_Model(nn.Module):
         # Apply channel
         print(self._sys_parameters.channel_type)
         if self._sys_parameters.channel_type == "AWGN":
-            print("flag4.45")
+            
             y = self._channel([x, no])
-            print("flag4.46")
+            
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
+            print("flag4.45")
+            print(type(x))
             y, h = self._channel([x, no])
         print("flag4.5")
         ###################################
