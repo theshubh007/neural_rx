@@ -280,8 +280,9 @@ class E2E_Model(nn.Module):
         active_dmrs = self._active_dmrs_mask(
             batch_size, num_tx, self._sys_parameters.max_num_tx
         )
-
+        print("flag:1")
         if mcs_ue_mask is None:
+            print("flag:2")
             assert isinstance(
                 mcs_arr_eval_idx, int
             ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
@@ -294,16 +295,21 @@ class E2E_Model(nn.Module):
                 batch_size, self._sys_parameters.max_num_tx, 1
             )
             mcs_arr_eval = [mcs_arr_eval_idx]
+            print("flag:3")
         else:
+            print("flag:4")
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
                 assert len(mcs_arr_eval_idx) == len(
                     self._sys_parameters.mcs_index
                 ), "mcs_arr_eval_idx list not compatible with length of mcs_index array"
                 mcs_arr_eval = mcs_arr_eval_idx
+                print("flag:5")
             else:
+                print("flag:6")
                 mcs_arr_eval = list(range(len(self._sys_parameters.mcs_index)))
 
         # Transmitters
+        print("flag:7")
         b = []
         for idx in range(len(mcs_arr_eval)):
             b.append(
@@ -315,7 +321,7 @@ class E2E_Model(nn.Module):
                     ]
                 )
             )
-
+        print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
 
