@@ -366,16 +366,29 @@ class CGNNIt(nn.Module):
 
 
 class AggregateUserStates(nn.Module):
+
     def __init__(self, d_s, num_units, layer_type="linear", dtype=torch.float32):
         super().__init__()
 
-        if layer_type != "linear":
-            raise NotImplementedError("Only linear layer type is currently supported.")
+        self.layer_type = layer_type
 
-        self.hidden_layers = nn.ModuleList(
-            [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
-        )
-        self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
+        if layer_type == "linear":
+            self.hidden_layers = nn.ModuleList(
+                [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
+            )
+            self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
+        elif layer_type == "conv1d":
+            self.hidden_layers = nn.ModuleList(
+                [nn.Conv1d(d_s, n, kernel_size=1, dtype=dtype) for n in num_units]
+            )
+            self.output_layer = nn.Conv1d(
+                num_units[-1], d_s, kernel_size=1, dtype=dtype
+            )
+        else:
+            raise NotImplementedError(
+                f"Layer type '{layer_type}' is not supported. Use 'linear' or 'conv1d'."
+            )
+
         self.activation = nn.ReLU()
 
     def forward(self, inputs):
@@ -384,7 +397,12 @@ class AggregateUserStates(nn.Module):
         # Process s
         sp = s
         for layer in self.hidden_layers:
+            if self.layer_type == "conv1d":
+                sp = sp.transpose(1, 2)  # Adjust dimensions for Conv1d
             sp = self.activation(layer(sp))
+            if self.layer_type == "conv1d":
+                sp = sp.transpose(1, 2)  # Restore original dimensions
+
         sp = self.output_layer(sp)
 
         # Aggregate all states
