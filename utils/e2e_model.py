@@ -592,15 +592,15 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-            print("flag4.10")
             # in training mode, only the losses are required
             if self._training:
+            print("flag4.10")
                 losses = self._receiver(
                     [y, active_dmrs, b, h, mcs_ue_mask], mcs_arr_eval
                 )
-                print("flag4.11")
                 return losses
             else:
+                print("flag4.11")
                 # in inference mode, the neural receiver returns:
                 # - reconstructed payload bits b_hat
                 # - refined channel estimate h_hat_refined
