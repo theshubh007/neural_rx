@@ -356,7 +356,7 @@ class E2E_Model(nn.Module):
             x_torch = torch.from_numpy(x_tf.numpy())
 
             # Adjust _mcs_ue_mask to match x_torch shape
-            _mcs_ue_mask = _mcs_ue_mask.expand(
+            _mcs_ue_mask = _mcs_ue_mask.unsqueeze(2).expand(
                 x_torch.shape[0], x_torch.shape[1], 1, 1, 1
             )
             _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
