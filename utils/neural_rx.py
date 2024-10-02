@@ -371,6 +371,7 @@ class AggregateUserStates(nn.Module):
         super().__init__()
 
         self.layer_type = layer_type
+        print(f"Layer type: {layer_type}")
 
         if layer_type == "linear":
             self.hidden_layers = nn.ModuleList(
