@@ -1046,6 +1046,7 @@ class CGNNOFDM(nn.Module):
         pass
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
+        print("flag: CGNNOFDM forward")
         if self.training:
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
@@ -1055,11 +1056,19 @@ class CGNNOFDM(nn.Module):
                     torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
                 )
             else:
+                print("flag:1")
                 mcs_ue_mask = mcs_ue_mask_eval
             mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-
-        num_tx = active_tx.shape[1]
-
+        print("flag:2")
+        # Check if active_tx is None and handle it
+        if active_tx is None:
+            # Use a default value or infer it from y
+            num_tx = y.shape[1] if len(y.shape) > 1 else 1
+            active_tx = torch.ones(y.shape[0], num_tx, device=y.device)
+        else:
+            num_tx = active_tx.shape[1]
+        # num_tx = active_tx.shape[1]
+        print("flag:3")
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
