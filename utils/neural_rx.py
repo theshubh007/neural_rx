@@ -1241,15 +1241,19 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
+        y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
+            h_hat, _ = self._ls_est([y_tf, tf.constant(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
+            h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
+            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
+
+            # Convert TensorFlow tensor back to PyTorch tensor
+            h_hat = torch.from_numpy(h_hat.numpy()).to(y.device)
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
         return h_hat
@@ -1290,12 +1294,23 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
-
+            # Convert PyTorch tensors to TensorFlow tensors
+            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
+            h_hat_tf = (
+                tf.convert_to_tensor(h_hat.detach().cpu().numpy())
+                if h_hat is not None
+                else None
+            )
+            active_tx_tf = tf.convert_to_tensor(active_tx.detach().cpu().numpy())
             llr, h_hat_refined = self._neural_rx(
-                (y, h_hat, active_tx),
+                (y_tf, h_hat_tf, active_tx_tf),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
+
+            # Convert TensorFlow tensors back to PyTorch tensors
+            llr = torch.from_numpy(llr.numpy()).to(y.device)
+            h_hat_refined = torch.from_numpy(h_hat_refined.numpy()).to(y.device)
             print("Flag: 4")
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
