@@ -215,6 +215,7 @@ class E2E_Model(nn.Module):
             print("Flag: Using Neural Receiver")
             self._sys_name = "Neural Receiver"
             self._receiver = NeuralPUSCHReceiver(self._sys_parameters, training)
+            print("Flag: Neural Receiver Initialized")
         else:
             raise NotImplementedError("Unknown system selected!")
 
