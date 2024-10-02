@@ -1002,6 +1002,7 @@ class TBDecoderWrapper(nn.Module):
 
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False):
+        print("Flag: Neural receiver -> __init__")
         super().__init__()
         self._sys_parameters = sys_parameters
         self._training = training
@@ -1009,12 +1010,13 @@ class NeuralPUSCHReceiver(nn.Module):
         # Initialize transport block encoders and decoders
         self._tb_encoders = nn.ModuleList()
         self._tb_decoders = nn.ModuleList()
+        print("Flag: 0")
         self._num_mcss_supported = (
             sys_parameters.mcs_index.shape[0]
             if isinstance(sys_parameters.mcs_index, tf.Tensor)
             else len(sys_parameters.mcs_index)
         )
-
+        print("Flag: 0.1")
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
                 TBEncoderWrapper(
@@ -1030,12 +1032,13 @@ class NeuralPUSCHReceiver(nn.Module):
                     )
                 )
             )
-
+        print("Flag: 0.2")
         # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
             self._precoding_mat = torch.tensor(
                 sys_parameters.transmitters[0]._precoder._w
             )
+            print("Flag: 0.3")
         else:
             self._precoding_mat = torch.ones(
                 sys_parameters.max_num_tx,
@@ -1043,6 +1046,7 @@ class NeuralPUSCHReceiver(nn.Module):
                 1,
                 dtype=torch.complex64,
             )
+            print("Flag: 0.4")
 
         # LS channel estimator
         rg = sys_parameters.transmitters[0]._resource_grid
@@ -1054,7 +1058,7 @@ class NeuralPUSCHReceiver(nn.Module):
             num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
             interpolation_type="nn",
         )
-
+        print("Flag: 0.5")
         rg_type = rg.build_type_grid()[:, 0]
         pilot_ind = torch.where(rg_type == 1)
         self._pilot_ind = pilot_ind[0]
@@ -1068,7 +1072,7 @@ class NeuralPUSCHReceiver(nn.Module):
                     sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
                 )
             )
-
+        print("Flag: 0.6")
         # Neural receiver
         self._neural_rx = CGNNOFDM(
             sys_parameters,
