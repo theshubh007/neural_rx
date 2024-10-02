@@ -14,7 +14,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import Layer
 import torch
 from torch import nn
-from numpy import np
+import numpy as np
 from sionna.utils import flatten_dims, split_dim, flatten_last_dims, expand_to_rank
 from sionna.utils import insert_dims
 from sionna.ofdm import ResourceGridDemapper
