@@ -342,6 +342,12 @@ class E2E_Model(nn.Module):
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
+        # Convert mcs_ue_mask to PyTorch tensor if it's not already
+        mcs_ue_mask = (
+            SionnaWrapper.tf_to_torch(mcs_ue_mask)
+            if isinstance(mcs_ue_mask, tf.Tensor)
+            else mcs_ue_mask
+        )
 
         _mcs_ue_mask = (
             mcs_ue_mask[:, :, mcs_arr_eval[0]]
@@ -350,7 +356,11 @@ class E2E_Model(nn.Module):
             .repeat(1, 1, 1, 1, 1)
             .to(torch.complex64)
         )
-        x = _mcs_ue_mask * self._transmitters[mcs_arr_eval[0]](b[0])
+        # Convert _mcs_ue_mask back to TensorFlow tensor
+        _mcs_ue_mask_tf = SionnaWrapper.torch_to_tf(_mcs_ue_mask)
+
+        # Use TensorFlow operations for Sionna components
+        x = tf.multiply(_mcs_ue_mask_tf, self._transmitters[mcs_arr_eval[0]](b[0]))
 
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = (
@@ -360,10 +370,22 @@ class E2E_Model(nn.Module):
                 .repeat(1, 1, 1, 1, 1)
                 .to(torch.complex64)
             )
-            x = x + _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
+            _mcs_ue_mask_tf = SionnaWrapper.torch_to_tf(_mcs_ue_mask)
+            x = x + tf.multiply(
+                _mcs_ue_mask_tf, self._transmitters[mcs_arr_eval[idx]](b[idx])
+            )
 
-        a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
-        x = torch.mul(x, a_tx.to(torch.complex64))
+        # Convert active_dmrs to PyTorch if it's not already
+        active_dmrs = (
+            SionnaWrapper.tf_to_torch(active_dmrs)
+            if isinstance(active_dmrs, tf.Tensor)
+            else active_dmrs
+        )
+
+        a_tx = expand_to_rank(active_dmrs, x.shape.rank, axis=-1)
+        a_tx_tf = SionnaWrapper.torch_to_tf(a_tx.to(torch.complex64))
+
+        x = tf.multiply(x, a_tx_tf)
 
         ###################################
         # Channel
