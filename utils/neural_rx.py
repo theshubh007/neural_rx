@@ -1226,17 +1226,22 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
+        if isinstance(y, torch.Tensor):
+            # Convert PyTorch tensor to TensorFlow tensor
+            y = tf.convert_to_tensor(y.detach().cpu().numpy())
+
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
+            h_hat, _ = self._ls_est([y, tf.constant(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
+            h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
+            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
+
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
@@ -1275,16 +1280,18 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             print("Flag: 3.1")
-            # Convert PyTorch tensors to TensorFlow tensors
-            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
-            active_tx_tf = tf.convert_to_tensor(active_tx.detach().cpu().numpy())
-            print("Flag: 3.2")
 
             # Estimate channel using TensorFlow tensors
-            h_hat_tf = self.estimate_channel(y_tf, num_tx)
+            h_hat_tf = self.estimate_channel(y, num_tx)
 
-            # Convert the result back to PyTorch tensor if needed
-            h_hat = torch.from_numpy(h_hat_tf.numpy()).to(y.device)
+            print("Flag: 3.2")
+
+            # Convert TensorFlow tensor back to PyTorch tensor if needed
+            if h_hat_tf is not None:
+                h_hat = torch.from_numpy(h_hat_tf.numpy()).to(y.device)
+            else:
+                h_hat = None
+
             print("Flag: 3.3")
             # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
