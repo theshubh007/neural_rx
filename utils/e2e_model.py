@@ -386,6 +386,7 @@ class E2E_Model(nn.Module):
         a_tx_tf = SionnaWrapper.torch_to_tf(a_tx.to(torch.complex64))
 
         x = tf.multiply(x, a_tx_tf)
+        print("flag:9")
 
         ###################################
         # Channel
@@ -419,6 +420,7 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._target_coderate,
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
+            print("flag:10")
 
         else:
             # ebno_db is actually SNR when self._sys_parameters.ebno==False
@@ -441,6 +443,7 @@ class E2E_Model(nn.Module):
             )  # disable indoor users
             self._sys_parameters.channel_model.set_topology(*topology)
 
+        print("flag:11")
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
             y = self._channel([x, no])
