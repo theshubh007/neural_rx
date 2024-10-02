@@ -521,14 +521,18 @@ class E2E_Model(nn.Module):
         # Apply channel
         print(self._sys_parameters.channel_type)
         if self._sys_parameters.channel_type == "AWGN":
-            
+
             y = self._channel([x, no])
-            
+
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
             print("flag4.45")
             print(type(x))
-            y, h = self._channel([x, no])
+            # Convert PyTorch tensors to NumPy arrays, then to TensorFlow tensors
+            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
+            no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
+            # y, h = self._channel([x, no])
+            y, h = self._channel([x_tf, no_tf])
         print("flag4.5")
         ###################################
         # Receiver
