@@ -1009,7 +1009,11 @@ class NeuralPUSCHReceiver(nn.Module):
         # Initialize transport block encoders and decoders
         self._tb_encoders = nn.ModuleList()
         self._tb_decoders = nn.ModuleList()
-        self._num_mcss_supported = len(sys_parameters.mcs_index)
+        self._num_mcss_supported = (
+            sys_parameters.mcs_index.shape[0]
+            if isinstance(sys_parameters.mcs_index, tf.Tensor)
+            else len(sys_parameters.mcs_index)
+        )
 
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
@@ -1108,11 +1112,16 @@ class NeuralPUSCHReceiver(nn.Module):
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
+            if isinstance(mcs_arr_eval, tf.Tensor):
+                mcs_arr_eval = mcs_arr_eval.numpy().tolist()
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]
             bits = []
-            for idx in range(len(mcs_arr_eval)):
-                bits.append(self._tb_encoders[mcs_arr_eval[idx]](b[idx]))
+            for idx, mcs in enumerate(mcs_arr_eval):
+                bits.append(
+                    self._sys_parameters.transmitters[mcs]._tb_encoder(
+                    b[idx])
+                )
 
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
