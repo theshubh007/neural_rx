@@ -927,6 +927,7 @@ class CGNNOFDM(nn.Module):
         self.dtype = dtype
         self.num_mcss_supported = len(sys_parameters.mcs_index)
         self.rg = sys_parameters.transmitters[0]._resource_grid
+        self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
 
         if self.sys_parameters.mask_pilots:
             print("Masking pilots for pilotless communications.")
@@ -968,13 +969,38 @@ class CGNNOFDM(nn.Module):
             self.bce = nn.BCEWithLogitsLoss(reduction="none")
             self.mse = nn.MSELoss(reduction="none")
 
-        self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
+        # self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
 
     def _compute_nearest_pilot_dist(self):
         # Compute and store the nearest pilot distance (positional encoding)
         # This method should be implemented to match the TensorFlow version's functionality
         # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        pass
+        # pass
+        rg = self.sys_parameters.transmitters[0]._resource_grid
+        pilot_pattern = rg.pilot_pattern
+        num_subcarriers = rg.num_subcarriers
+        num_ofdm_symbols = rg.num_ofdm_symbols
+
+        pilot_indices = pilot_pattern.pilot_indices
+
+        subcarrier_indices = torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
+        symbol_indices = torch.arange(num_ofdm_symbols).unsqueeze(0).expand(num_subcarriers, -1)
+
+        nearest_pilot_dist = torch.zeros(self.max_num_tx, num_subcarriers, num_ofdm_symbols, 2)
+
+        for tx in range(self.max_num_tx):
+            tx_pilot_indices = pilot_indices[tx]
+            for sc in range(num_subcarriers):
+                for sym in range(num_ofdm_symbols):
+                    if [sc, sym] in tx_pilot_indices:
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([0., 0.])
+                    else:
+                        distances = torch.sqrt((subcarrier_indices - sc)**2 + (symbol_indices - sym)**2)
+                        min_distance, min_index = torch.min(distances, dim=None)
+                        nearest_pilot = tx_pilot_indices[min_index]
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([sc - nearest_pilot[0], sym - nearest_pilot[1]]).float()
+
+        return nearest_pilot_dist
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
         if self.training:
