@@ -11,6 +11,7 @@
 ##### E2E model for system evaluations #####
 
 import tensorflow as tf
+
 # from tensorflow.keras import Model
 from sionna.channel import gen_single_sector_topology
 from sionna.utils import BinarySource, ebnodb2no, expand_to_rank, log10
@@ -221,14 +222,16 @@ class E2E_Model(nn.Module):
     def _active_dmrs_mask(self, batch_size, num_tx, max_num_tx):
         max_num_tx = torch.tensor(max_num_tx, dtype=torch.int32)
         num_tx = torch.tensor(num_tx, dtype=torch.int32)
+        # Create a range tensor and expand it to match the batch size
         r = (
             torch.arange(max_num_tx, dtype=torch.int32)
             .unsqueeze(0)
-            .repeat(batch_size, 1)
+            .expand(batch_size, -1)
         )
-        x = torch.where(
-            r < num_tx.unsqueeze(1), torch.ones_like(r), torch.zeros_like(r)
-        )
+
+        # Create a mask using broadcasting
+        x = (r < num_tx.unsqueeze(1)).float()
+
         return x
 
     def _mask_active_dmrs(
