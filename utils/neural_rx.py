@@ -1110,7 +1110,6 @@ class NeuralPUSCHReceiver(Layer):
         self._tb_decoders = []
 
         self._num_mcss_supported = len(sys_parameters.mcs_index)
-        print("NeuralPUSCHReceiver init")
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
                 self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
@@ -1176,7 +1175,7 @@ class NeuralPUSCHReceiver(Layer):
             layer_type_dense=sys_parameters.layer_type_dense,
             layer_type_conv=sys_parameters.layer_type_conv,
             layer_type_readout=sys_parameters.layer_type_readout,
-            # dtype=sys_parameters.nrx_dtype,
+            dtype=sys_parameters.nrx_dtype,
         )
 
     def estimate_channel(self, y, num_tx):
@@ -1238,7 +1237,7 @@ class NeuralPUSCHReceiver(Layer):
         """
         Apply neural receiver.
         """
-        print("NeuralPUSCHReceiver call")
+
         # assume u is provided as input in training mode
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
