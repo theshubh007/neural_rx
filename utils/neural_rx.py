@@ -1110,6 +1110,7 @@ class NeuralPUSCHReceiver(nn.Module):
         return h
 
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+        print("Flag: Neural receiver -> Forward")
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
             if isinstance(mcs_arr_eval, tf.Tensor):
@@ -1118,22 +1119,21 @@ class NeuralPUSCHReceiver(nn.Module):
                 b = [b]
             bits = []
             for idx, mcs in enumerate(mcs_arr_eval):
-                bits.append(
-                    self._sys_parameters.transmitters[mcs]._tb_encoder(
-                    b[idx])
-                )
+                bits.append(self._sys_parameters.transmitters[mcs]._tb_encoder(b[idx]))
 
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
-
+            print("Flag: 1")
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
 
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
+            print("Flag: 2")
             return losses
         else:
+            print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
@@ -1143,7 +1143,7 @@ class NeuralPUSCHReceiver(nn.Module):
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
-
+            print("Flag: 4")
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
