@@ -89,7 +89,7 @@ class Parameters:
         ###################################
 
         # create parser object and read config file
-        fn = f"/content/neural_rx/config/{config_name}"
+        fn = f"{config_name}"
         if exists(fn):
             config = configparser.RawConfigParser()
             # automatically add fileformat if needed
