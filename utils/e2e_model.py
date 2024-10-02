@@ -373,18 +373,15 @@ class E2E_Model(nn.Module):
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
 
         print("flag:10")
+
         # Check if x is a TensorFlow tensor or PyTorch tensor
-        if isinstance(x, tf.Tensor):
-            print("flag:10.1")
-            # If x is a TensorFlow tensor, convert a_tx to TensorFlow tensor
-            a_tx = tf.convert_to_tensor(a_tx.numpy())
-            # Use TensorFlow broadcasting instead of expand_as
-            a_tx = tf.broadcast_to(a_tx, tf.shape(x))
-            print("flag:10.2")
-        else:
-            print("flag:10.3")
-            # If x is a PyTorch tensor, use PyTorch's expand_as
-            a_tx = a_tx.expand_as(x)
+        def expand_as(tensor, target):
+            if isinstance(tensor, tf.Tensor):
+                return tf.broadcast_to(tensor, tf.shape(target))
+            else:
+                return tensor.expand_as(target)
+
+        a_tx = expand_as(a_tx, x)
 
         # Perform the multiplication
         if isinstance(x, tf.Tensor):
