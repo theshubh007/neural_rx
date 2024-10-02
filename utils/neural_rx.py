@@ -972,14 +972,10 @@ class CGNNOFDM(nn.Module):
         # self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
 
     def _compute_nearest_pilot_dist(self):
-        # Compute and store the nearest pilot distance (positional encoding)
-        # This method should be implemented to match the TensorFlow version's functionality
-        # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        # pass
         rg = self.sys_parameters.transmitters[0]._resource_grid
         pilot_pattern = rg.pilot_pattern
-        num_subcarriers = rg.num_subcarriers
-        num_ofdm_symbols = rg.num_ofdm_symbols
+        num_subcarriers = rg.num_resource_elements
+        num_ofdm_symbols = rg.num_ofdm_symbols_per_slot
 
         pilot_indices = pilot_pattern.pilot_indices
 
@@ -1009,7 +1005,7 @@ class CGNNOFDM(nn.Module):
                         nearest_pilot_dist[tx, sc, sym] = torch.tensor(
                             [sc - nearest_pilot[0], sym - nearest_pilot[1]]
                         ).float()
-
+        print(dir(rg))
         return nearest_pilot_dist
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
@@ -1037,9 +1033,9 @@ class CGNNOFDM(nn.Module):
         y = torch.cat([y.real, y.imag], dim=-1)
 
         if self.nearest_pilot_dist is None:
-          # Compute nearest_pilot_dist on-the-fly if it's None
+            # Compute nearest_pilot_dist on-the-fly if it's None
             self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
-        
+
         pe = self.nearest_pilot_dist[:num_tx]
 
         y = y.to(self.dtype)
