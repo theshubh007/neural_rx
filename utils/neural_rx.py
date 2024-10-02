@@ -20,7 +20,7 @@ from sionna.utils import (
 )
 import numpy as np
 from sionna.ofdm import ResourceGridDemapper
-from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
+from sionna.nr import TBDecoder, PUSCHLSChannelEstimator
 from sionna.nr import LayerDemapper as SionnaLayerDemapper
 
 
@@ -152,23 +152,42 @@ class AggregateUserStates(nn.Module):
     def __init__(self, d_s, num_units, layer_type="linear", dtype=torch.float32):
         super().__init__()
 
-        if layer_type != "linear":
-            raise NotImplementedError("Only linear layer type is currently supported.")
+        if layer_type == "linear":
+            self.hidden_layers = nn.ModuleList(
+                [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
+            )
+            self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
+        elif layer_type == "conv1d":
+            self.hidden_layers = nn.ModuleList(
+                [nn.Conv1d(d_s, n, kernel_size=1, dtype=dtype) for n in num_units]
+            )
+            self.output_layer = nn.Conv1d(
+                num_units[-1], d_s, kernel_size=1, dtype=dtype
+            )
+        else:
+            raise NotImplementedError(
+                f"Layer type '{layer_type}' is not supported. Use 'linear' or 'conv1d'."
+            )
 
-        self.hidden_layers = nn.ModuleList(
-            [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
-        )
-        self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
         self.activation = nn.ReLU()
+        self.layer_type = layer_type
 
     def forward(self, inputs):
         s, active_tx = inputs
 
         # Process s
         sp = s
+        if self.layer_type == "conv1d":
+            # For Conv1d, we need to change the input shape
+            sp = sp.transpose(1, 2)  # Change from [B, C, ...] to [B, ..., C]
+
         for layer in self.hidden_layers:
             sp = self.activation(layer(sp))
         sp = self.output_layer(sp)
+
+        if self.layer_type == "conv1d":
+            # Change back to original shape
+            sp = sp.transpose(1, 2)
 
         # Aggregate all states
         active_tx = expand_to_rank(active_tx, sp.dim(), axis=-1)
@@ -1462,7 +1481,7 @@ class NeuralReceiverONNX(Model):
         nrx_dtype,
         num_tx,
         num_rx_ant,
-        **kwargs
+        **kwargs,
     ):
 
         super().__init__(**kwargs)
