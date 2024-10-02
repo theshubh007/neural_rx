@@ -576,7 +576,7 @@ class E2E_Model(nn.Module):
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
         ):
-
+            print("flag4.9")
             # perfect CSI receiver needs ground truth channel
             b_hat = self._receiver([y, h, no])
 
@@ -592,12 +592,13 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-
+            print("flag4.10")
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
                     [y, active_dmrs, b, h, mcs_ue_mask], mcs_arr_eval
                 )
+                print("flag4.11")
                 return losses
             else:
                 # in inference mode, the neural receiver returns:
@@ -615,6 +616,7 @@ class E2E_Model(nn.Module):
                 # Data
                 # b only holds bits corresponding to MCS indices specified
                 # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
+                print("flag4.12")
                 b, b_hat, tb_crc_status = self._mask_active_dmrs(
                     b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
                 )
@@ -623,9 +625,9 @@ class E2E_Model(nn.Module):
                 h_hat_output_shape = torch.cat(
                     [[batch_size, num_tx], h_hat_refined.shape[2:]], dim=0
                 )
-                print("flag5")
+                
                 a_mask = expand_to_rank(active_dmrs, h_hat_refined.dim(), axis=-1)
-                print("flag6")
+                print("flag4.13")
                 a_mask = a_mask.expand(h_hat_refined.shape)
                 if h_hat is not None:
                     h_hat = h_hat[a_mask]
@@ -636,7 +638,7 @@ class E2E_Model(nn.Module):
                 h = self._receiver.preprocess_channel_ground_truth(h)
                 h = h[a_mask]
                 h = h.view(h_hat_output_shape)
-
+                print("flag4.14")
                 # if activated, return channel estimates (and ground truth CFRs)
                 if self._return_tb_status:
                     if output_nrx_h_hat:
