@@ -977,7 +977,10 @@ class CGNNOFDM(nn.Module):
         num_subcarriers = rg.num_effective_subcarriers
         num_ofdm_symbols = rg.num_ofdm_symbols  # Changed from num_ofdm_symbols_per_slot
 
-        pilot_indices = pilot_pattern.pilot_indices
+        # Construct pilot indices based on available information
+        dmrs_symbols = pilot_pattern.dmrs_symbols
+        dmrs_subcarriers = pilot_pattern.dmrs_subcarriers
+        pilot_indices = [[(sc, sym) for sc in dmrs_subcarriers] for sym in dmrs_symbols]
 
         subcarrier_indices = (
             torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
