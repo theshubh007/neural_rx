@@ -594,7 +594,7 @@ class E2E_Model(nn.Module):
         elif self._sys_parameters.system == "nrx":
             # in training mode, only the losses are required
             if self._training:
-                print("flag4.101")
+            
                 losses = self._receiver(
                     [y, active_dmrs, b, h, mcs_ue_mask], mcs_arr_eval
                 )

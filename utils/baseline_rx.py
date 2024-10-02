@@ -278,6 +278,7 @@ class BaselineReceiver(nn.Module):
         )
 
     def forward(self, inputs):
+        print("Flag: BaselineReceiver forward")
         if self._sys_parameters.system in (
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
@@ -345,7 +346,7 @@ class LowComplexityLMSEEstimator(nn.Module):
         self._interpol = lambda x, y: (x, y)  # Placeholder
 
     def forward(self, inputs):
-    
+
         y, no = inputs
         y_eff = self._removed_nulled_scs(y)
         y_eff_flat = flatten_last_dims(y_eff)
