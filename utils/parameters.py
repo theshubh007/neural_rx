@@ -13,11 +13,7 @@
 
 import numpy as np
 import configparser
-
-import torch
-import torch.nn as nn
-
-# import tensorflow as tf
+import tensorflow as tf
 from os.path import exists
 from sionna.nr import (
     PUSCHConfig,
@@ -32,20 +28,6 @@ from sionna.mimo import StreamManagement
 from sionna.channel import OFDMChannel, AWGN
 from .channel_models import DoubleTDLChannel, DatasetChannel
 from .impairments import FrequencyOffset
-
-
-class PUSCHTransmitterWrapper(nn.Module):
-    def __init__(self, pusch_transmitter):
-        super().__init__()
-        self.pusch_transmitter = pusch_transmitter
-
-    def forward(self, input_bits):
-        # Convert PyTorch tensor to NumPy array
-        input_np = input_bits.detach().cpu().numpy()
-        # Call the original TensorFlow-based transmitter
-        output_tf = self.pusch_transmitter(input_np)
-        # Convert the output back to a PyTorch tensor
-        return torch.from_numpy(output_tf.numpy())
 
 
 class Parameters:
@@ -107,12 +89,11 @@ class Parameters:
         ###################################
 
         # create parser object and read config file
-
-        fn = f"{config_name}"
+        fn = f"../config/{config_name}"
         if exists(fn):
             config = configparser.RawConfigParser()
-            config_name = config_name.replace(".cfg", "") + ".cfg"
-            print(f"Loading config file: {fn}")
+            # automatically add fileformat if needed
+            config_name.replace(".cfg", "") + ".cfg"
             config.read(fn)
         else:
             raise FileNotFoundError("Unknown config file.")
@@ -155,35 +136,40 @@ class Parameters:
         #####################################
 
         # init PUSCHConfig
-        # Initialize PUSCH configurations
         carrier_config = CarrierConfig(
             n_cell_id=self.n_cell_id,
             cyclic_prefix=self.cyclic_prefix,
-            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),
+            subcarrier_spacing=int(self.subcarrier_spacing / 1e3),  # in kHz
             n_size_grid=self.n_size_bwp,
             n_start_grid=self.n_start_grid,
             slot_number=self.slot_number,
             frame_number=self.frame_number,
         )
 
+        # init DMRSConfig
         pusch_dmrs_config = PUSCHDMRSConfig(
             config_type=self.dmrs_config_type,
             type_a_position=self.dmrs_type_a_position,
             additional_position=self.dmrs_additional_position,
             length=self.dmrs_length,
-            dmrs_port_set=self.dmrs_port_sets[0],
+            dmrs_port_set=self.dmrs_port_sets[0],  # first user
             n_scid=self.n_scid,
             num_cdm_groups_without_data=self.num_cdm_groups_without_data,
         )
 
         mcs_list = self.mcs_index
-        self.pusch_configs = []
+        # generate pusch configs for all MCSs
+        self.pusch_configs = []  # self.pusch_configs[MCS_CONFIG][N_UE]
         for mcs_list_idx in range(len(mcs_list)):
             self.pusch_configs.append([])
             mcs_index = mcs_list[mcs_list_idx]
+            # init TBConfig
             tb_config = TBConfig(
                 mcs_index=mcs_index, mcs_table=self.mcs_table, channel_type="PUSCH"
             )
+            # n_id=self.n_ids[0])
+
+            # first user PUSCH config
             pc = PUSCHConfig(
                 carrier_config=carrier_config,
                 pusch_dmrs_config=pusch_dmrs_config,
@@ -194,9 +180,14 @@ class Parameters:
                 tpmi=self.tpmi,
                 mapping_type=self.dmrs_mapping_type,
             )
+
+            # clone new PUSCHConfig for each additional user
             for idx, _ in enumerate(self.dmrs_port_sets):
-                p = pc.clone()
+                p = pc.clone()  # generate new PUSCHConfig
+                # set user specific parts
                 p.dmrs.dmrs_port_set = self.dmrs_port_sets[idx]
+                # The following parameters are derived from default.
+                # Comment lines if specific configuration is not required.
                 p.n_id = self.n_ids[idx]
                 p.dmrs.n_id = self.dmrs_nid[idx]
                 p.n_rnti = self.n_rntis[idx]
@@ -206,23 +197,26 @@ class Parameters:
         ##### Consistency checks #####
         ##############################
 
-        # Consistency checks
+        # after training we can only reduce the number of iterations
         assert (
             self.num_nrx_iter_eval <= self.num_nrx_iter
         ), "num_nrx_iter_eval must be smaller or equal num_nrx_iter."
 
+        # for the evaluation, only activate num_tx_eval configs
         if not training:
+            # overwrite num_tx_eval if explicitly provided:
             if num_tx_eval is not None:
                 num_tx_eval = num_tx_eval
-            else:
+            else:  # if not provided use all available port sets
                 num_tx_eval = len(self.dmrs_port_sets)
-            self.max_num_tx = num_tx_eval
-            self.min_num_tx = num_tx_eval
-            for mcs_list_idx in range(len(mcs_list)):
-                self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
-                    : self.max_num_tx
-                ]
-            print(f"Evaluating the first {self.max_num_tx} port sets.")
+            self.max_num_tx = num_tx_eval  # non-varying users for evaluation
+            self.min_num_tx = num_tx_eval  # non-varying users for evaluation
+
+        for mcs_list_idx in range(len(mcs_list)):
+            self.pusch_configs[mcs_list_idx] = self.pusch_configs[mcs_list_idx][
+                : self.max_num_tx
+            ]
+        print(f"Evaluating the first {self.max_num_tx} port sets.")
 
         ##################################
         ##### Configure Transmitters #####
@@ -237,16 +231,12 @@ class Parameters:
             # only generate pilot pattern for first MCS's PUSCH config, as
             # pilots are independent from MCS index
             pilot_pattern = PUSCHPilotPattern(self.pusch_configs[0])
-            self.pilots.append(pilot_pattern.pilots.numpy())  # Convert to NumPy array
-
-        # Convert the list of NumPy arrays to a PyTorch tensor
-        self.pilots = torch.stack(
-            [torch.from_numpy(pilot) for pilot in self.pilots], dim=0
-        )
-
-        # for pcs in self.pusch_configs:
-        #     for pc in pcs:
-        #         pc.carrier.slot_number = self.slot_number
+            self.pilots.append(pilot_pattern.pilots)
+        self.pilots = tf.stack(self.pilots, axis=0)
+        self.pilots = tf.constant(self.pilots)
+        for pcs in self.pusch_configs:
+            for pc in pcs:
+                pc.carrier.slot_number = self.slot_number
 
         # transmitter is a list of PUSCHTransmitters, one for each MCS
         self.transmitters = []
@@ -260,7 +250,6 @@ class Parameters:
                     verbose=self.verbose,
                 )
             )
-            
 
             # support end-to-end learning / custom constellations
             # see https://arxiv.org/pdf/2009.05261 for details
@@ -483,21 +472,21 @@ class Parameters:
 
         # Load covariance matrices
         if self.system in ("baseline_lmmse_kbest", "baseline_lmmse_lmmse"):
+
+            # test if files exist
             fn = f"../weights/{self.label}_time_cov_mat.npy"
             if not exists(fn):
                 raise FileNotFoundError(
                     "time_cov_mat.npy not found. "
                     "Please run compute_cov_mat.py for given config first."
                 )
-            self.space_cov_mat = torch.tensor(
-                np.load(f"../weights/{self.label}_space_cov_mat.npy"),
-                dtype=torch.complex64,
+
+            self.space_cov_mat = tf.cast(
+                np.load(f"../weights/{self.label}_space_cov_mat.npy"), tf.complex64
             )
-            self.time_cov_mat = torch.tensor(
-                np.load(f"../weights/{self.label}_time_cov_mat.npy"),
-                dtype=torch.complex64,
+            self.time_cov_mat = tf.cast(
+                np.load(f"../weights/{self.label}_time_cov_mat.npy"), tf.complex64
             )
-            self.freq_cov_mat = torch.tensor(
-                np.load(f"../weights/{self.label}_freq_cov_mat.npy"),
-                dtype=torch.complex64,
+            self.freq_cov_mat = tf.cast(
+                np.load(f"../weights/{self.label}_freq_cov_mat.npy"), tf.complex64
             )
