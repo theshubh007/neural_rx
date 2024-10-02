@@ -222,6 +222,7 @@ class E2E_Model(nn.Module):
     def _active_dmrs_mask(self, batch_size, num_tx, max_num_tx):
         max_num_tx = torch.tensor(max_num_tx, dtype=torch.int32)
         num_tx = torch.tensor(num_tx, dtype=torch.int32)
+
         # Create a range tensor and expand it to match the batch size
         r = (
             torch.arange(max_num_tx, dtype=torch.int32)
@@ -229,8 +230,11 @@ class E2E_Model(nn.Module):
             .expand(batch_size, -1)
         )
 
-        # Create a mask using broadcasting
-        x = (r < num_tx.unsqueeze(1)).float()
+        # Create a mask using broadcasting without unsqueezing num_tx
+        x = (r < num_tx).float()
+
+        # If you need to randomize the active DMRS ports (as in the original TensorFlow code):
+        x = x[torch.randperm(batch_size)]
 
         return x
 
