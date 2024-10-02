@@ -83,6 +83,7 @@ class BaselineReceiver(nn.Module):
         ###################################
         # Channel Estimation
         ###################################
+        print("Flag: BaselineReceiver")
         if sys_parameters.system in ("baseline_lmmse_kbest", "baseline_lmmse_lmmse"):
             # Setup channel estimator for non-perfect CSI
 
