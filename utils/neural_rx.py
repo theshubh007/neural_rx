@@ -9,7 +9,8 @@
 # its affiliates is strictly prohibited.
 
 ##### Neural Receiver #####
-
+import torch
+import torch.nn as nn
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras import Model
@@ -26,395 +27,292 @@ from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
-class StateInit(Layer):
-    # pylint: disable=line-too-long
-    r"""
+class StateInit(nn.Module):
+    """
     Network initializing the state tensor for each user.
 
-    The network consist of len(num_units) hidden blocks, each block
-    consisting of
+    The network consists of len(num_units) hidden blocks, each block
+    consisting of:
     - A Separable conv layer (including a pointwise convolution)
     - A ReLU activation
-
     The last block is the output block and has the same architecture, but
     with `d_s` units and no non-linearity
 
     Parameters
-    -----------
+    ----------
     d_s : int
         Size of the state vector
-
     num_units : list of int
         Number of kernels for the hidden layers of the MLP.
-
-    layer_type: str | "sepconv" | "conv"
-        Defines which Convolutional layers are used. Will be either
-        SeparableConv2D or Conv2D.
+    layer_type: str
+        Defines which Convolutional layers are used. Can be "sepconv" or "conv".
 
     Input
-    ------
-    (y, pe, h_hat)
-    Tuple:
-
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], tf.float
+    -----
+    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], torch.Tensor
         The received OFDM resource grid after cyclic prefix removal and FFT.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
         Map showing the position of the nearest pilot for every user in time
-        and frequency.
-        This can be seen as a form of positional encoding.
-
+        and frequency. This can be seen as a form of positional encoding.
     h_hat : None or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                     2*num_rx_ant], tf.float
+             2*num_rx_ant], torch.Tensor
         Initial channel estimate. If `None`, `h_hat` will be ignored.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    ------
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Initial state tensor for each user.
     """
 
-    def __init__(
-        self, d_s, num_units, layer_type="sepconv", dtype=tf.float32, **kwargs
-    ):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="sepconv"):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        # one could add custom layers here
         if layer_type == "sepconv":
-            layer = SeparableConv2D
+            conv_layer = nn.Sequential(
+                nn.Conv2d(1, 1, kernel_size=3, padding=1),
+                nn.Conv2d(1, 1, kernel_size=1),
+            )
         elif layer_type == "conv":
-            layer = Conv2D
+            conv_layer = nn.Conv2d
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden blocks
-        self._hidden_conv = []
+        self.hidden_conv = nn.ModuleList()
         for n in num_units:
-            conv = layer(n, (3, 3), padding="same", activation="relu", dtype=dtype)
-            self._hidden_conv.append(conv)
+            self.hidden_conv.append(
+                nn.Sequential(conv_layer(n, n, kernel_size=3, padding=1), nn.ReLU())
+            )
 
         # Output block
-        self._output_conv = layer(
-            d_s, (3, 3), activation=None, padding="same", dtype=dtype
-        )
+        self.output_conv = conv_layer(num_units[-1], d_s, kernel_size=3, padding=1)
 
-    def call(self, inputs):
+    def forward(self, inputs):
         y, pe, h_hat = inputs
 
-        # y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-        #  tf.float
-        #  The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # h_hat : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #          2*num_rx_ant], tf.float
-        #     Channel estimate.
-
-        batch_size = tf.shape(y)[0]
-        num_tx = tf.shape(pe)[0]
+        batch_size = y.shape[0]
+        num_tx = pe.shape[1]
 
         # Stack the inputs
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, dim]
+        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1, 1)
+        y = y.reshape(-1, *y.shape[2:])
+        pe = pe.reshape(-1, *pe.shape[2:])
 
-        y = tf.tile(tf.expand_dims(y, axis=1), [1, num_tx, 1, 1, 1])
-        y = flatten_dims(y, 2, 0)
-
-        pe = tf.tile(tf.expand_dims(pe, axis=0), [batch_size, 1, 1, 1, 1])
-        pe = flatten_dims(pe, 2, 0)
-
-        # ignore h_hat if no channel estimate is provided
         if h_hat is not None:
-            h_hat = flatten_dims(h_hat, 2, 0)
-            # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols,
-            #   4*num_rx_ant + 3]
-            z = tf.concat([y, pe, h_hat], axis=-1)
+            h_hat = h_hat.reshape(-1, *h_hat.shape[2:])
+            z = torch.cat([y, pe, h_hat], dim=-1)
         else:
-            z = tf.concat([y, pe], axis=-1)
+            z = torch.cat([y, pe], dim=-1)
 
         # Apply the neural network
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-        layers = self._hidden_conv
-        for conv in layers:
+        z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
+        for conv in self.hidden_conv:
             z = conv(z)
-        z = self._output_conv(z)
+        z = self.output_conv(z)
 
         # Unflatten
-        s0 = split_dim(z, [batch_size, num_tx], 0)
+        z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
+        s0 = z.reshape(batch_size, num_tx, *z.shape[1:])
 
         return s0  # Initial state of every user
 
 
-class AggregateUserStates(Layer):
-    # pylint: disable=line-too-long
-    r"""
-    For every user n, aggregate the states of all the other users n' != n.
-
+class AggregateUserStates(nn.Module):
+    """
+    For every user n, aggregate the states of all the other users n'!= n.
     An MLP is applied to every state before aggregating.
+
     This is a MLP with len(num_units) hidden layers with ReLU activation and
     num_units[i] units for the ith layer.
-    The output layer is a dense layer without non-linearity and with
-    `d_s` units.
+    The output layer is a linear layer without non-linearity and with `d_s` units.
 
     The input `active_tx` provides a mask of active users and non-active users
     will be ignored in the aggregation.
 
     Parameters
-    -----------
+    ----------
     d_s : int
         Size of the state vector
-
     num_units : list of int
         Number of units for the hidden layers.
-
-    layer_type: str | "dense"
-        Defines which Dense layers are used.
+    layer_type: str
+        Defines which Dense layers are used. Currently only supports "linear".
 
     Input
-    ------
-    (s, active_tx)
-    Tuple:
-
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
-        Size of the state vector.
-
-    active_tx: [batch_size, num_tx], tf.float
-        Active user mask where each `0` indicates non-active users and `1`
-        indicates an active user.
+    -----
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
+        State tensor.
+    active_tx: [batch_size, num_tx], torch.Tensor
+        Active user mask.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    ------
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         For every user `n`, aggregate state of the other users, i.e.,
         sum(s, axis=1) - s[:,n,:,:,:]
     """
 
-    def __init__(self, d_s, num_units, layer_type="dense", dtype=tf.float32, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="linear", dtype=torch.float32):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        # Currently only dense is supported
-        if layer_type == "dense":
-            layer = Dense
-        else:
-            raise NotImplementedError("Unknown layer_type selected.")
+        if layer_type != "linear":
+            raise NotImplementedError("Only linear layer type is currently supported.")
 
-        self._hidden_layers = []
-        for n in num_units:
-            self._hidden_layers.append(layer(n, activation="relu", dtype=dtype))
-        self._output_layer = layer(d_s, activation=None, dtype=dtype)
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
+        )
+        self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
+        self.activation = nn.ReLU()
 
-    def call(self, inputs):
-        r"""
-        s, active_tx = inputs
-
-        s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-            tf.float
-            State tensor.
-        active_tx: [batch_size, num_tx], tf.float
-            Active user mask.
-        """
-
+    def forward(self, inputs):
         s, active_tx = inputs
 
         # Process s
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         sp = s
-        for layer in self._hidden_layers:
-            sp = layer(sp)
-        sp = self._output_layer(sp)
+        for layer in self.hidden_layers:
+            sp = self.activation(layer(sp))
+        sp = self.output_layer(sp)
 
         # Aggregate all states
-        # [batch_size, 1, num_subcarriers, num_ofdm_symbols, d_s]
-        # mask non active users
-        active_tx = expand_to_rank(active_tx, tf.rank(sp), axis=-1)
-        sp = tf.multiply(sp, active_tx)
+        active_tx = expand_to_rank(active_tx, sp.dim(), axis=-1)
+        sp = torch.mul(sp, active_tx)
 
-        # aggregate and remove self-state
-        # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-        a = tf.reduce_sum(sp, axis=1, keepdims=True) - sp
+        # Aggregate and remove self-state
+        a = torch.sum(sp, dim=1, keepdim=True) - sp
 
-        # scale by number of active users
-        p = tf.reduce_sum(active_tx, axis=1, keepdims=True) - 1.0
-        p = tf.nn.relu(p)  # clip negative values to ignore non-active user
+        # Scale by number of active users
+        p = torch.sum(active_tx, dim=1, keepdim=True) - 1.0
+        p = torch.clamp(p, min=0.0)  # clip negative values to ignore non-active user
+        p = torch.where(p == 0.0, torch.ones_like(p), 1.0 / p)
 
-        # avoid 0 for single active user
-        p = tf.where(p == 0.0, 1.0, tf.math.divide_no_nan(1.0, p))
-
-        # and scale states by number of aggregated users
-        a = tf.multiply(a, p)
+        # Scale states by number of aggregated users
+        a = torch.mul(a, p)
 
         return a
 
 
-class UpdateState(Layer):
-    # pylint: disable=line-too-long
-    r"""
+class UpdateState(nn.Module):
+    """
     Updates the state tensor.
 
-    The network consist of len(num_units) hidden blocks, each block i
-    consisting of
+    The network consists of len(num_units) hidden blocks, each block consisting of:
     - A Separable conv layer (including a pointwise convolution)
     - A ReLU activation
-
-    The last block is the output block and has the same architecture, but
-    with `d_s` units and no non-linearity.
-
+    The last block is the output block and has the same architecture, but with `d_s` units and no non-linearity.
     The network ends with a skip connection with the state.
 
     Parameters
-    -----------
+    ----------
     d_s : int
         Size of the state vector.
-
     num_units : list of int
-        Number of kernel for the hidden separable convolutional layers.
-
-    layer_type: str | "sepconv" | "conv"
-        Defines which Convolutional layers are used. Will be either
-        SeparableConv2D or Conv2D.
+        Number of kernels for the hidden separable convolutional layers.
+    layer_type: str
+        Defines which Convolutional layers are used. Can be "sepconv" or "conv".
 
     Input
-    ------
-    (s, a, pe)
-    Tuple:
-
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
-        Size of the state vector.
-
-    a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    -----
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
+        State tensor.
+    a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Aggregated states from other users.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        Map showing the position of the nearest pilot for every user in time
-        and frequency. This can be seen as a form of positional encoding.
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
+        Map showing the position of the nearest pilot for every user in time and frequency.
+        This can be seen as a form of positional encoding.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    ------
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Updated channel state vector.
     """
 
-    def __init__(
-        self, d_s, num_units, layer_type="sepconv", dtype=tf.float32, **kwargs
-    ):
-        super().__init__(**kwargs)
+    def __init__(self, d_s, num_units, layer_type="sepconv"):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
         if layer_type == "sepconv":
-            layer = SeparableConv2D
+            conv_layer = nn.Sequential(
+                nn.Conv2d(1, 1, kernel_size=3, padding=1),
+                nn.Conv2d(1, 1, kernel_size=1),
+            )
         elif layer_type == "conv":
-            layer = Conv2D
+            conv_layer = nn.Conv2d
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden blocks
-        self._hidden_conv = []
+        self.hidden_conv = nn.ModuleList()
         for n in num_units:
-            conv = layer(n, (3, 3), padding="same", activation="relu", dtype=dtype)
-            self._hidden_conv.append(conv)
+            self.hidden_conv.append(
+                nn.Sequential(conv_layer(n, n, kernel_size=3, padding=1), nn.ReLU())
+            )
 
         # Output block
-        self._output_conv = layer(
-            d_s, (3, 3), padding="same", activation=None, dtype=dtype
-        )
+        self.output_conv = conv_layer(num_units[-1], d_s, kernel_size=3, padding=1)
 
-    def call(self, inputs):
+    def forward(self, inputs):
         s, a, pe = inputs
 
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     State tensor.
-
-        # a : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     Aggregated states from other users.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        batch_size = tf.shape(s)[0]
-        num_tx = tf.shape(s)[1]
+        batch_size = s.shape[0]
+        num_tx = s.shape[1]
 
         # Stack the inputs
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        pe = tf.tile(tf.expand_dims(pe, axis=0), [batch_size, 1, 1, 1, 1])
+        pe = pe.repeat(batch_size, 1, 1, 1, 1)
         pe = flatten_dims(pe, 2, 0)
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         s = flatten_dims(s, 2, 0)
-        # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         a = flatten_dims(a, 2, 0)
+
         # [batch_size*num_tx, num_subcarriers, num_ofdm_symbols, 2*d_s + 2]
-        z = tf.concat([a, s, pe], axis=-1)
+        z = torch.cat([a, s, pe], dim=-1)
 
         # Apply the neural network
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]]
-        layers = self._hidden_conv
-        for conv in layers:
+        z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
+        for conv in self.hidden_conv:
             z = conv(z)
-        z = self._output_conv(z)
+        z = self.output_conv(z)
+
         # Skip connection
-        z = z + s
+        z = z + s.permute(0, 3, 1, 2)
+
         # Unflatten
+        z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
         s_new = split_dim(z, [batch_size, num_tx], 0)
 
-        return s_new  # Update tensor state for each user
+        return s_new  # Updated tensor state for each user
 
 
-class CGNNIt(Layer):
-    # pylint: disable=line-too-long
-    r"""
+class CGNNIt(nn.Module):
+    """
     Implements an iteration of the CGNN detector.
-
     Consists of two stages: State aggregation followed by state update.
 
     Parameters
-    -----------
+    ----------
     d_s : int
         Size of the state vector.
-
     num_units_agg : list of int
-        Number of kernel for the hidden dense layers of the aggregation network
-
+        Number of units for the hidden dense layers of the aggregation network.
     num_units_state_update : list of int
-        Number of kernel for the hidden separable convolutional layers of the
-        state-update network
-
-    layer_type_dense: str | "dense"
+        Number of units for the hidden separable convolutional layers of the state-update network.
+    layer_type_dense: str
         Layer type of Dense layers. Dense is used for state aggregation.
-
-    layer_type_conv: str | "sepconv" | "conv"
+    layer_type_conv: str
         Layer type of convolutional layers. CNNs are used for state updates.
-
-    dtype: tf.float32 | tf.float64
+    dtype: torch.dtype
         Dtype of the layer.
 
     Input
-    ------
-    (s, pe, active_tx)
-    Tuple:
-
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
-        Size of the state vector.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        Map showing the position of the nearest pilot for every user in time
-        and frequency.
+    -----
+    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
+        State vector.
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
+        Map showing the position of the nearest pilot for every user in time and frequency.
         This can be seen as a form of positional encoding.
-
-    active_tx: [batch_size, num_tx], tf.float
-        Active user mask where each `0` indicates non-active users and `1`
-        indicates an active user.
+    active_tx: [batch_size, num_tx], torch.Tensor
+        Active user mask where each `0` indicates non-active users and `1` indicates an active user.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    ------
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
         Updated channel state vector.
     """
 
@@ -423,12 +321,11 @@ class CGNNIt(Layer):
         d_s,
         num_units_agg,
         num_units_state_update,
-        layer_type_dense="dense",
+        layer_type_dense="linear",
         layer_type_conv="sepconv",
-        dtype=tf.float32,
-        **kwargs
+        dtype=torch.float32,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
 
         # Layer for state aggregation
         self._state_aggreg = AggregateUserStates(
@@ -440,20 +337,8 @@ class CGNNIt(Layer):
             d_s, num_units_state_update, layer_type_conv, dtype=dtype
         )
 
-    def call(self, inputs):
+    def forward(self, inputs):
         s, pe, active_tx = inputs
-
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #     tf.float
-        #     Size of the state vector.
-
-        # pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        #     Map showing the position of the nearest pilot for every user in
-        #     time and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # active_tx: [batch_size, num_tx], tf.float
-        #      Active user mask.
 
         # User state aggregation
         a = self._state_aggreg((s, active_tx))
@@ -464,230 +349,276 @@ class CGNNIt(Layer):
         return s_new
 
 
-class ReadoutLLRs(Layer):
-    # pylint: disable=line-too-long
-    r"""
+class AggregateUserStates(nn.Module):
+    def __init__(self, d_s, num_units, layer_type="linear", dtype=torch.float32):
+        super().__init__()
+
+        if layer_type != "linear":
+            raise NotImplementedError("Only linear layer type is currently supported.")
+
+        self.hidden_layers = nn.ModuleList(
+            [nn.Linear(d_s, n, dtype=dtype) for n in num_units]
+        )
+        self.output_layer = nn.Linear(num_units[-1], d_s, dtype=dtype)
+        self.activation = nn.ReLU()
+
+    def forward(self, inputs):
+        s, active_tx = inputs
+
+        # Process s
+        sp = s
+        for layer in self.hidden_layers:
+            sp = self.activation(layer(sp))
+        sp = self.output_layer(sp)
+
+        # Aggregate all states
+        active_tx = expand_to_rank(active_tx, sp.dim(), axis=-1)
+        sp = torch.mul(sp, active_tx)
+
+        # Aggregate and remove self-state
+        a = torch.sum(sp, dim=1, keepdim=True) - sp
+
+        # Scale by number of active users
+        p = torch.sum(active_tx, dim=1, keepdim=True) - 1.0
+        p = torch.clamp(p, min=0.0)  # clip negative values to ignore non-active user
+        p = torch.where(p == 0.0, torch.ones_like(p), 1.0 / p)
+
+        # Scale states by number of aggregated users
+        a = torch.mul(a, p)
+
+        return a
+
+
+class UpdateState(nn.Module):
+    def __init__(self, d_s, num_units, layer_type="sepconv"):
+        super().__init__()
+
+        if layer_type == "sepconv":
+            conv_layer = nn.Sequential(
+                nn.Conv2d(1, 1, kernel_size=3, padding=1),
+                nn.Conv2d(1, 1, kernel_size=1),
+            )
+        elif layer_type == "conv":
+            conv_layer = nn.Conv2d
+        else:
+            raise NotImplementedError("Unknown layer_type selected.")
+
+        # Hidden blocks
+        self.hidden_conv = nn.ModuleList()
+        for n in num_units:
+            self.hidden_conv.append(
+                nn.Sequential(conv_layer(n, n, kernel_size=3, padding=1), nn.ReLU())
+            )
+
+        # Output block
+        self.output_conv = conv_layer(num_units[-1], d_s, kernel_size=3, padding=1)
+
+    def forward(self, inputs):
+        s, a, pe = inputs
+
+        batch_size = s.shape[0]
+        num_tx = s.shape[1]
+
+        # Stack the inputs
+        pe = pe.repeat(batch_size, 1, 1, 1, 1)
+        pe = flatten_dims(pe, 2, 0)
+        s = flatten_dims(s, 2, 0)
+        a = flatten_dims(a, 2, 0)
+
+        z = torch.cat([a, s, pe], dim=-1)
+
+        # Apply the neural network
+        z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
+        for conv in self.hidden_conv:
+            z = conv(z)
+        z = self.output_conv(z)
+
+        # Skip connection
+        z = z + s.permute(0, 3, 1, 2)
+
+        # Unflatten
+        z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
+        s_new = split_dim(z, [batch_size, num_tx], 0)
+
+        return s_new
+
+
+class ReadoutLLRs(nn.Module):
+    """
     Network computing LLRs from the state vectors.
 
     This is a MLP with len(num_units) hidden layers with ReLU activation and
     num_units[i] units for the ith layer.
-    The output layer is a dense layer without non-linearity and with
+    The output layer is a linear layer without non-linearity and with
     `num_bits_per_symbol` units.
 
     Parameters
-    -----------
+    ----------
     num_bits_per_symbol : int
         Number of bits per symbol.
-
     num_units : list of int
         Number of units for the hidden layers.
-
-    layer_type: str | "dense"
-        Defines which type of Dense layers are used.
-
-    dtype: tf.float32 | tf.float64
-        Dtype of the layer.
+    layer_type : str, optional
+        Defines which type of linear layers are used. Default is "linear".
+    dtype : torch.dtype, optional
+        Dtype of the layer. Default is torch.float32.
 
     Input
-    ------
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
+    -----
+    s : torch.Tensor
+        [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
         Data state.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-       num_bits_per_symbol], tf.float
+    ------
+    torch.Tensor
+        [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_bits_per_symbol]
         LLRs for each bit of each stream.
     """
 
     def __init__(
-        self,
-        num_bits_per_symbol,
-        num_units,
-        layer_type="dense",
-        dtype=tf.float32,
-        **kwargs
+        self, num_bits_per_symbol, num_units, layer_type="linear", dtype=torch.float32
     ):
-        super().__init__(**kwargs)
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        if layer_type == "dense":
-            layer = Dense
-        else:
-            raise NotImplementedError("Unknown layer_type selected.")
+        if layer_type != "linear":
+            raise NotImplementedError("Only linear layer type is currently supported.")
 
-        self._hidden_layers = []
+        self.layers = nn.ModuleList()
         for n in num_units:
-            self._hidden_layers.append(layer(n, activation="relu", dtype=dtype))
+            self.layers.append(nn.Linear(n, n, dtype=dtype))
+            self.layers.append(nn.ReLU())
 
-        self._output_layer = layer(num_bits_per_symbol, activation=None, dtype=dtype)
+        self.output_layer = nn.Linear(num_units[-1], num_bits_per_symbol, dtype=dtype)
 
-    def call(self, s):
+    def forward(self, s):
+        """
+        Forward pass of the ReadoutLLRs module.
 
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        #      tf.float
-        #     State vector
+        Parameters
+        ----------
+        s : torch.Tensor
+            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
+            State vector
 
-        # Input of the MLP
+        Returns
+        -------
+        torch.Tensor
+            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_bits_per_symbol]
+            LLRs on the transmitted bits
+        """
         z = s
-        # Apply MLP
-        # Output : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #           num_bits_per_symbol]
-        for layer in self._hidden_layers:
+        for layer in self.layers:
             z = layer(z)
-        llr = self._output_layer(z)
+        llr = self.output_layer(z)
+        return llr
 
-        return llr  # LLRs on the transmitted bits
 
-
-class ReadoutChEst(Layer):
-    # pylint: disable=line-too-long
-    r"""
+class ReadoutChEst(nn.Module):
+    """
     Network computing channel estimate.
 
     This is a MLP with len(num_units) hidden layers with ReLU activation and
     num_units[i] units for the ith layer.
-    The output layer is a dense layer without non-linearity and with
-    `num_bits_per_symbol` units.
+    The output layer is a linear layer without non-linearity and with
+    2*num_rx_ant units.
 
     Parameters
-    -----------
-    num_bits_per_symbol : int
-        Number of bits per symbol.
-
+    ----------
+    num_rx_ant : int
+        Number of receive antennas.
     num_units : list of int
         Number of units for the hidden layers.
-
-    layer_type: str | "dense"
-        Defines which Dense layers are used.
+    layer_type : str, optional
+        Defines which type of linear layers are used. Default is "linear".
+    dtype : torch.dtype, optional
+        Dtype of the layer. Default is torch.float32.
 
     Input
-    ------
-    s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], tf.float
-        Data state.
+    -----
+    s : torch.Tensor
+        [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
+        State vector.
 
     Output
-    -------
-    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-      tf.float
+    ------
+    torch.Tensor
+        [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
         Channel estimate for each stream.
     """
 
-    def __init__(
-        self, num_rx_ant, num_units, layer_type="dense", dtype=tf.float32, **kwargs
-    ):
-        super().__init__(**kwargs)
+    def __init__(self, num_rx_ant, num_units, layer_type="linear", dtype=torch.float32):
+        super().__init__()
 
-        # allows for the configuration of multiple layer types
-        if layer_type == "dense":
-            layer = Dense
-        else:
-            raise NotImplementedError("Unknown layer_type selected.")
+        if layer_type != "linear":
+            raise NotImplementedError("Only linear layer type is currently supported.")
 
-        self._hidden_layers = []
+        self.layers = nn.ModuleList()
         for n in num_units:
-            self._hidden_layers.append(layer(n, activation="relu", dtype=dtype))
-        self._output_layer = layer(2 * num_rx_ant, activation=None, dtype=dtype)
+            self.layers.append(nn.Linear(n, n, dtype=dtype))
+            self.layers.append(nn.ReLU())
 
-    def call(self, s):
+        self.output_layer = nn.Linear(num_units[-1], 2 * num_rx_ant, dtype=dtype)
 
-        # s : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s],
-        # tf.float
-        #     State vector
+    def forward(self, s):
+        """
+        Forward pass of the ReadoutChEst module.
 
-        # Input of the MLP
+        Parameters
+        ----------
+        s : torch.Tensor
+            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
+            State vector
+
+        Returns
+        -------
+        torch.Tensor
+            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
+            Channel estimate for each stream
+        """
         z = s
-        # Apply MLP
-        # Output : [batch_size, num_tx, num_subcarriers,
-        #                   num_ofdm_symbols, 2*num_rx_ant]
-        for layer in self._hidden_layers:
+        for layer in self.layers:
             z = layer(z)
-        h_hat = self._output_layer(z)
+        h_hat = self.output_layer(z)
+        return h_hat
 
-        return h_hat  # Channel estimate
 
+class CGNN(nn.Module):
+    """
+    Implements the core neural receiver consisting of convolutional and graph layer components (CGNN).
 
-class CGNN(Model):
-    # pylint: disable=line-too-long
-    r"""
-    Implements the core neural receiver consisting of
-    convolutional and graph layer components (CGNN).
-
-    Parameters
+    Parameters:
     -----------
     num_bits_per_symbol : list of ints
-        Number of bits per resource element. Defined as list for mixed MCS
-        schemes.
-
+        Number of bits per resource element. Defined as list for mixed MCS schemes.
     num_rx_ant : int
         Number of receive antennas
-
     num_it : int
         Number of iterations.
-
     d_s : int
         Size of the state vector.
-
     num_units_init : list of int
         Number of hidden units for the init network.
-
     num_units_agg : list of list of ints
-        Number of kernel for the hidden dense layers of the aggregation network
-        per iteration.
-
+        Number of kernel for the hidden dense layers of the aggregation network per iteration.
     num_units_state : list of list of ints
         Number of hidden units for the state-update network per iteration.
-
     num_units_readout : list of int
         Number of hidden units for the read-out network.
-
-    layer_type_dense: str | "dense"
+    layer_type_dense: str
         Layer type of Dense layers.
-
-    layer_type_conv: str | "sepconv" | "conv"
+    layer_type_conv: str
         Layer type of convolutional layers.
-
-    layer_type_readout: str | "dense"
+    layer_type_readout: str
         Layer type of Dense readout layers.
-
     training : boolean
         Set to `True` if instantiated for training. Set to `False` otherwise.
-        In non-training mode, the readout is only applied to the last iteration.
-
-    dtype: tf.float32, tf.float64
+    apply_multiloss : boolean
+        If True, apply loss at each iteration.
+    var_mcs_masking : boolean
+        If True, use variable MCS masking.
+    dtype: torch.dtype
         Dtype of the layer.
-
-    Input
-    ------
-    (y, pe, h_hat, active_tx)
-    Tuple:
-
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], tf.float
-        The received OFDM resource grid after cyclic prefix removal and FFT.
-
-    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        Map showing the position of the nearest pilot for every user in time
-        and frequency. This can be seen as a form of positional encoding.
-
-    h_hat : `None` or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                       2*num_rx_ant], tf.float
-        Initial channel estimate. If `None`, `h_hat` will be ignored.
-
-    active_tx: [batch_size, num_tx], tf.float
-        Active user mask where each `0` indicates non-active users and `1`
-        indicates an active user.
-
-    Output
-    -------
-    llrs : list of [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                    num_bits_per_symbol], tf.float
-        List of LLRs on (coded) bits. Each list entry refers to one iteration.
-        If Training is False, only the last iteration is returned.
-
-    h_hats : list of [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                      2*num_rx_ant], tf.float
-         List of refined channel estimates. Each list entry refers to one
-         iteration. If Training is False, only the last iteration is returned.
     """
 
     def __init__(
@@ -706,79 +637,117 @@ class CGNN(Model):
         training=False,
         apply_multiloss=False,
         var_mcs_masking=False,
-        dtype=tf.float32,
-        **kwargs
+        dtype=torch.float32,
     ):
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__()
 
-        self._training = training
-
-        self._apply_multiloss = apply_multiloss
-        self._var_mcs_masking = var_mcs_masking
+        self.training = training
+        self.apply_multiloss = apply_multiloss
+        self.var_mcs_masking = var_mcs_masking
+        self.num_it = num_it
+        self.num_mcss_supported = len(num_bits_per_symbol)
+        self.num_bits_per_symbol = num_bits_per_symbol
 
         # Initialization for the state
-        if self._var_mcs_masking:
-            self._s_init = [
-                StateInit(d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype)
-            ]
+        if self.var_mcs_masking:
+            self.s_init = StateInit(
+                d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype
+            )
         else:
-            self._s_init = []
-            for _ in num_bits_per_symbol:
-                self._s_init.append(
+            self.s_init = nn.ModuleList(
+                [
                     StateInit(
                         d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype
                     )
-                )
+                    for _ in num_bits_per_symbol
+                ]
+            )
 
         # Iterations blocks
-        self._iterations = []
-        for i in range(num_it):
-            it = CGNNIt(
-                d_s,
-                num_units_agg[i],
-                num_units_state[i],
-                layer_type_dense=layer_type_dense,
-                layer_type_conv=layer_type_conv,
-                dtype=dtype,
-            )
-            self._iterations.append(it)
-        self._num_it = num_it
-
-        # Readouts
-        if self._var_mcs_masking:
-            self._readout_llrs = [
-                ReadoutLLRs(
-                    np.max(num_bits_per_symbol),
-                    num_units_readout,
-                    layer_type=layer_type_readout,
+        self.iterations = nn.ModuleList(
+            [
+                CGNNIt(
+                    d_s,
+                    num_units_agg[i],
+                    num_units_state[i],
+                    layer_type_dense=layer_type_dense,
+                    layer_type_conv=layer_type_conv,
                     dtype=dtype,
                 )
+                for i in range(num_it)
             ]
+        )
+
+        # Readouts
+        if self.var_mcs_masking:
+            self.readout_llrs = ReadoutLLRs(
+                max(num_bits_per_symbol),
+                num_units_readout,
+                layer_type=layer_type_readout,
+                dtype=dtype,
+            )
         else:
-            self._readout_llrs = []
-            for num_bits in num_bits_per_symbol:
-                self._readout_llrs.append(
+            self.readout_llrs = nn.ModuleList(
+                [
                     ReadoutLLRs(
                         num_bits,
                         num_units_readout,
                         layer_type=layer_type_readout,
                         dtype=dtype,
                     )
-                )
-        # The h_hat readout is mostly used for faster training convergence
-        # by using a second loss on the channel estimate.
-        # However, it can be also used after deployment, e.g., for reporting to
-        # higher layers.
-        self._readout_chest = ReadoutChEst(
+                    for num_bits in num_bits_per_symbol
+                ]
+            )
+
+        self.readout_chest = ReadoutChEst(
             num_rx_ant, num_units_readout, layer_type=layer_type_readout, dtype=dtype
         )
 
-        self._num_mcss_supported = len(num_bits_per_symbol)
-        self._num_bits_per_symbol = num_bits_per_symbol
+    def forward(self, inputs):
+        y, pe, h_hat, active_tx, mcs_ue_mask = inputs
+
+        # Normalization
+        norm_scaling = torch.mean(torch.square(y), dim=(1, 2, 3), keepdim=True)
+        norm_scaling = 1.0 / torch.sqrt(norm_scaling)
+        y = y * norm_scaling
+        norm_scaling = norm_scaling.unsqueeze(1)
+        if h_hat is not None:
+            h_hat = h_hat * norm_scaling
+
+        # State initialization
+        if self.var_mcs_masking:
+            s = self.s_init((y, pe, h_hat))
+        else:
+            s = sum(
+                self.s_init[idx]((y, pe, h_hat))
+                * expand_to_rank(mcs_ue_mask[:, :, idx : idx + 1], 5, axis=-1)
+                for idx in range(self.num_mcss_supported)
+            )
+
+        # Run receiver iterations
+        llrs = []
+        h_hats = []
+        for i in range(self.num_it):
+            # State update
+            s = self.iterations[i]([s, pe, active_tx])
+
+            # Read-outs
+            if (self.training and self.apply_multiloss) or i == self.num_it - 1:
+                llrs_ = []
+                for idx in range(self.num_mcss_supported):
+                    if self.var_mcs_masking:
+                        llrs__ = self.readout_llrs(s)
+                        llrs__ = llrs__[..., : self.num_bits_per_symbol[idx]]
+                    else:
+                        llrs__ = self.readout_llrs[idx](s)
+                    llrs_.append(llrs__)
+                llrs.append(llrs_)
+                h_hats.append(self.readout_chest(s))
+
+        return llrs, h_hats
 
     @property
     def apply_multiloss(self):
-        """Average loss over all iterations or eval just the last iteration."""
         return self._apply_multiloss
 
     @apply_multiloss.setter
@@ -788,221 +757,52 @@ class CGNN(Model):
 
     @property
     def num_it(self):
-        """Number of receiver iterations."""
         return self._num_it
 
     @num_it.setter
     def num_it(self, val):
         assert (val >= 1) and (
-            val <= len(self._iterations)
+            val <= len(self.iterations)
         ), "Invalid number of iterations"
         self._num_it = val
 
-    def call(self, inputs):
-        y, pe, h_hat, active_tx, mcs_ue_mask = inputs
 
-        # y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-        #     tf.float
-        #   The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        # pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2],
-        #      tf.float
-        #  Map showing the position of the nearest pilot for every user in time
-        #     and frequency.
-        #     This can be seen as a form of positional encoding.
-
-        # h_hat : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-        #          2*num_rx_ant], tf.float
-        #     Channel estimate.
-
-        # active_tx: [batch_size, num_tx], tf.float
-        #      Active user mask.
-
-        ########################################
-        # Normalization
-        #########################################
-        # we normalize the input such that each batch sample has unit power
-        # [batch_size, 1, 1, 1]
-        norm_scaling = tf.reduce_mean(tf.square(y), axis=(1, 2, 3), keepdims=True)
-        norm_scaling = tf.math.divide_no_nan(1.0, tf.sqrt(norm_scaling))
-        # [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-        y = y * norm_scaling
-        # [batch_size, 1, 1, 1, 1]
-        norm_scaling = tf.expand_dims(norm_scaling, axis=1)
-        # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-        if h_hat is not None:
-            h_hat = h_hat * norm_scaling
-
-        ########################################
-        # State initialization
-        ########################################
-
-        # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-        if self._var_mcs_masking:
-            s = self._s_init[0]((y, pe, h_hat))
-        else:
-            s = self._s_init[0]((y, pe, h_hat)) * expand_to_rank(
-                tf.gather(mcs_ue_mask, indices=0, axis=2), 5, axis=-1
-            )
-            for idx in range(1, self._num_mcss_supported):
-                s = s + self._s_init[idx]((y, pe, h_hat)) * expand_to_rank(
-                    tf.gather(mcs_ue_mask, indices=idx, axis=2), 5, axis=-1
-                )
-
-        ########################################
-        # Run receiver iterations
-        ########################################
-        # Remark: each iteration uses a different NN with different weights
-        # weight sharing could possibly be used, but degrades the performance
-        llrs = []
-        h_hats = []
-        for i in range(self._num_it):
-            it = self._iterations[i]
-            # State update
-            # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-            s = it([s, pe, active_tx])
-
-            # Read-outs
-            # [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-            #  num_bits_per_symbol]
-            # only during training every intermediate iteration is tracked
-            if (self._training and self._apply_multiloss) or i == self._num_it - 1:
-                llrs_ = []
-                # iterate over all MCS schemes individually
-                for idx in range(self._num_mcss_supported):
-                    if self._var_mcs_masking:
-                        llrs__ = self._readout_llrs[0](s)
-                        # Masking of LLR outputs to the desired
-                        # num_bits_per_symbol[idx] (for all users and all MCS
-                        # schemes)
-                        llrs__ = tf.gather(
-                            llrs__,
-                            indices=tf.range(self._num_bits_per_symbol[idx]),
-                            axis=-1,
-                        )
-                    else:
-                        llrs__ = self._readout_llrs[idx](s)
-                    llrs_.append(llrs__)
-                llrs.append(llrs_)
-                h_hats.append(self._readout_chest(s))
-
-        return llrs, h_hats
-
-
-class CGNNOFDM(Model):
-    # pylint: disable=line-too-long
-    r"""
+class CGNNOFDM(nn.Module):
+    """
     Wrapper for the neural receiver (CGNN) layer that handles
     OFDM waveforms and the resourcegrid mapping/demapping.
-
     Layer also integrates loss function computation.
 
-    Parameters
+    Parameters:
     -----------
     sys_parameters : Parameters
         The system parameters.
-
     max_num_tx : int
         Maximum number of transmitters
-
-    training : boolean
+    training : bool
         Set to `True` if instantiated for training. Set to `False` otherwise.
-
     num_it : int
         Number of iterations.
-
     d_s : int
         Size of the state vector.
-
     num_units_init : list of int
         Number of hidden units for the init network.
-
     num_units_agg : list of int
         Number of kernel for the hidden dense layers of the aggregation network.
-
     num_units_state : list of int
         Number of hidden units for the state-update network.
-
     num_units_readout : list of int
         Number of hidden units for the read-out network.
-
-    layer_type_dense: str | "dense"
+    layer_demappers : list of nn.Module
+        List of layer demappers for each MCS.
+    layer_type_dense: str
         Layer type of Dense layers.
-
-    layer_type_conv: str | "sepconv" | "conv"
+    layer_type_conv: str
         Layer type of convolutional layers.
-
-    layer_type_readout: str | "dense"
+    layer_type_readout: str
         Layer type of Dense readout layers.
-
-    nrx_dtype: DType
+    dtype: torch.dtype
         DType of the NRX layers.
-
-    Input
-    ------
-    (y, h_hat, active_tx, [bits, h, mcs_ue_mask]) :
-        Tuple:
-    y : [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size], tf.complex
-        The received OFDM resource grid after cyclic prefix removal and FFT.
-
-    h_hat : `None` or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-                       2*num_rx_ant], tf.float
-        Initial channel estimate. If `None`, `h_hat` will be ignored.
-
-    active_tx: [batch_size, num_tx], tf.float
-        Active user mask where each `0` indicates non-active users and `1`
-        indicates an active user.
-
-    bits : [batch_size, num_tx, num_data_symbols*num_bits_per_symbol], tf.int
-        Transmitted bits.
-        Only required for training to compute the loss function.
-
-    h : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant],
-        tf.float
-        Ground-truth channel impulse response.
-        Only required for training to compute the loss function.
-
-    mcs_ue_mask: [batch_size, max_num_tx, len(mcs_index)], tf.int32
-        One-hot mask that specifies the MCS index of each UE for each batch
-        sample. Only required for training (if self._training==True).
-
-    mcs_arr_eval : list with int elements
-        Selects the elements (indices) of the mcs_index array to process.
-
-    mcs_ue_mask_eval: [batch_size, max_num_tx, len(mcs_index)], tf.int32, None
-        Optional additional parameter to specify an mcs_ue_mask for evaluation
-        (self._training=False).
-        Defaults to None, which internally assumes that all UEs are scheduled
-        with mcs_arr_eval[0]
-
-    Output
-    ------
-    Depending on the value of `training`:
-
-    If `training` is set to `False`: (llr, h_hat_refined)
-
-        llr : [batch_size, num_tx, num_data_symbols*num_bits_per_symbol],
-              tf.float
-            LLRs for every bit of every stream for specified MCS.
-
-        h_hat_refined: [batch_size, num_tx, num_effective_subcarriers,
-                    num_ofdm_symbols, 2*num_rx_ant]
-            Refined channel estimate from the NRX.
-
-    If `training` is set to `True`: (loss_data, loss_chest)
-
-        loss_data: tf.float
-            Binary cross-entropy loss on LLRs. Computed from active UEs and
-            their selected MCSs.
-
-        loss_chest: tf.float
-            Mean-squared-error (MSE) loss between channel estimates and ground
-            truth channel CFRs. Only relevant if double-readout is used.
-
-    Note
-    ----
-    Receiver only supports single stream per user.
-
     """
 
     def __init__(
@@ -1017,52 +817,40 @@ class CGNNOFDM(Model):
         num_units_state=[[64]],
         num_units_readout=[64],
         layer_demappers=None,
-        layer_type_dense="dense",
+        layer_type_dense="linear",
         layer_type_conv="sepconv",
-        layer_type_readout="dense",
-        nrx_dtype=tf.float32,
-        **kwargs
+        layer_type_readout="linear",
+        dtype=torch.float32,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
 
-        self._training = training
-        self._max_num_tx = max_num_tx
-        self._layer_demappers = layer_demappers
-        self._sys_parameters = sys_parameters
-        self._nrx_dtype = nrx_dtype
+        self.training = training
+        self.max_num_tx = max_num_tx
+        self.layer_demappers = layer_demappers
+        self.sys_parameters = sys_parameters
+        self.dtype = dtype
+        self.num_mcss_supported = len(sys_parameters.mcs_index)
+        self.rg = sys_parameters.transmitters[0]._resource_grid
 
-        self._num_mcss_supported = len(sys_parameters.mcs_index)
-
-        self._rg = sys_parameters.transmitters[0]._resource_grid
-
-        if self._sys_parameters.mask_pilots:
+        if self.sys_parameters.mask_pilots:
             print("Masking pilots for pilotless communications.")
 
-        self._mcs_var_mcs_masking = False
-        if hasattr(self._sys_parameters, "mcs_var_mcs_masking"):
-            self._mcs_var_mcs_masking = self._sys_parameters.mcs_var_mcs_masking
+        self.mcs_var_mcs_masking = False
+        if hasattr(self.sys_parameters, "mcs_var_mcs_masking"):
+            self.mcs_var_mcs_masking = self.sys_parameters.mcs_var_mcs_masking
             print("Var-MCS NRX with masking.")
         elif len(sys_parameters.mcs_index) > 1:
             print("Var-MCS NRX with MCS-specific IO layers.")
-        else:
-            # Single-MCS NRX.
-            pass
 
-        # all UEs in the same pusch config must use the same MCS
-        num_bits_per_symbol = []
-        for mcs_list_idx in range(self._num_mcss_supported):
-            num_bits_per_symbol.append(
-                sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol
-            )
+        num_bits_per_symbol = [
+            sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol
+            for mcs_list_idx in range(self.num_mcss_supported)
+        ]
 
-        # Number of receive antennas
         num_rx_ant = sys_parameters.num_rx_antennas
 
-        ####################################################
-        # Core neural receiver
-        ####################################################
-        self._cgnn = CGNN(
-            num_bits_per_symbol,  # is a list
+        self.cgnn = CGNN(
+            num_bits_per_symbol,
             num_rx_ant,
             num_it,
             d_s,
@@ -1074,405 +862,128 @@ class CGNNOFDM(Model):
             layer_type_dense=layer_type_dense,
             layer_type_conv=layer_type_conv,
             layer_type_readout=layer_type_readout,
-            var_mcs_masking=self._mcs_var_mcs_masking,
-            dtype=nrx_dtype,
+            var_mcs_masking=self.mcs_var_mcs_masking,
+            dtype=dtype,
         )
 
-        ###################################################
-        # Resource grid demapper to extract the
-        # data-carrying resource elements from the
-        # resource grid
-        ###################################################
-        self._rg_demapper = ResourceGridDemapper(self._rg, sys_parameters.sm)
+        self.rg_demapper = ResourceGridDemapper(self.rg, sys_parameters.sm)
 
-        #################################################
-        # Instantiate the loss function if training
-        #################################################
         if training:
-            # Loss function
-            self._bce = tf.keras.losses.BinaryCrossentropy(
-                from_logits=True, reduction=tf.keras.losses.Reduction.NONE
-            )
-            # Loss function
-            self._mse = tf.keras.losses.MeanSquaredError(
-                reduction=tf.keras.losses.Reduction.NONE
-            )
+            self.bce = nn.BCEWithLogitsLoss(reduction="none")
+            self.mse = nn.MSELoss(reduction="none")
 
-        ###############################################
-        # Pre-compute positional encoding.
-        # Positional encoding consists in the distance
-        # to the nearest pilot in time and frequency.
-        # It is therefore a 2D positional encoding.
-        ##############################################
+        self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
 
-        # Indices of the pilot-carrying resource elements and pilot symbols
-        rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
-        pilot_ind = tf.where(rg_type == 1)
-        pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3)
-        # Resource grid carrying only the pilots
-        # [max_num_tx, num_effective_subcarriers, num_ofdm_symbols]
-        pilots_only = tf.scatter_nd(pilot_ind, pilots, rg_type.shape)
-        # Indices of pilots carrying RE (transmitter, freq, time)
-        pilot_ind = tf.where(tf.abs(pilots_only) > 1e-3)
-        pilot_ind = np.array(pilot_ind)
+    def _compute_nearest_pilot_dist(self):
+        # Compute and store the nearest pilot distance (positional encoding)
+        # This method should be implemented to match the TensorFlow version's functionality
+        # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
+        pass
 
-        # Sort the pilots according to which to which TX they are allocated
-        pilot_ind_sorted = [[] for _ in range(max_num_tx)]
-
-        for p_ind in pilot_ind:
-            tx_ind = p_ind[0]
-            re_ind = p_ind[1:]
-            pilot_ind_sorted[tx_ind].append(re_ind)
-        pilot_ind_sorted = np.array(pilot_ind_sorted)
-
-        # Distance to the nearest pilot in time
-        # Initialized with zeros and then filled.
-        pilots_dist_time = np.zeros(
-            [
-                max_num_tx,
-                self._rg.num_ofdm_symbols,
-                self._rg.fft_size,
-                pilot_ind_sorted.shape[1],
-            ]
-        )
-        # Distance to the nearest pilot in frequency
-        # Initialized with zeros and then filled
-        pilots_dist_freq = np.zeros(
-            [
-                max_num_tx,
-                self._rg.num_ofdm_symbols,
-                self._rg.fft_size,
-                pilot_ind_sorted.shape[1],
-            ]
-        )
-
-        t_ind = np.arange(self._rg.num_ofdm_symbols)
-        f_ind = np.arange(self._rg.fft_size)
-
-        for tx_ind in range(max_num_tx):
-            for i, p_ind in enumerate(pilot_ind_sorted[tx_ind]):
-
-                pt = np.expand_dims(np.abs(p_ind[0] - t_ind), axis=1)
-                pilots_dist_time[tx_ind, :, :, i] = pt
-
-                pf = np.expand_dims(np.abs(p_ind[1] - f_ind), axis=0)
-                pilots_dist_freq[tx_ind, :, :, i] = pf
-
-        # Normalizing the tensors of distance to force zero-mean and
-        # unit variance.
-        nearest_pilot_dist_time = np.min(pilots_dist_time, axis=-1)
-        nearest_pilot_dist_freq = np.min(pilots_dist_freq, axis=-1)
-        nearest_pilot_dist_time -= np.mean(
-            nearest_pilot_dist_time, axis=1, keepdims=True
-        )
-        std_ = np.std(nearest_pilot_dist_time, axis=1, keepdims=True)
-        nearest_pilot_dist_time = np.where(
-            std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
-        )
-        nearest_pilot_dist_freq -= np.mean(
-            nearest_pilot_dist_freq, axis=2, keepdims=True
-        )
-        std_ = np.std(nearest_pilot_dist_freq, axis=2, keepdims=True)
-        nearest_pilot_dist_freq = np.where(
-            std_ > 0.0, nearest_pilot_dist_freq / std_, nearest_pilot_dist_freq
-        )
-
-        # Stacking the time and frequency distances and casting to TF types.
-        nearest_pilot_dist = np.stack(
-            [nearest_pilot_dist_time, nearest_pilot_dist_freq], axis=-1
-        )
-        nearest_pilot_dist = tf.constant(nearest_pilot_dist, tf.float32)
-        # Reshaping to match the expected shape.
-        # [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        self._nearest_pilot_dist = tf.transpose(nearest_pilot_dist, [0, 2, 1, 3])
-
-    @property
-    def num_it(self):
-        """Number of receiver iterations. No weight sharing is used."""
-        return self._cgnn.num_it
-
-    @num_it.setter
-    def num_it(self, val):
-        self._cgnn.num_it = val
-
-    def call(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
-
-        # training requires to feed the inputs
-        # mcs_ue_mask: [batch_size, num_tx, num_mcss], tf.float
-        if self._training:
+    def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
+        if self.training:
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
             y, h_hat_init, active_tx = inputs
             if mcs_ue_mask_eval is None:
-                mcs_ue_mask = tf.one_hot(
-                    mcs_arr_eval[0], depth=self._num_mcss_supported
+                mcs_ue_mask = torch.nn.functional.one_hot(
+                    torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
                 )
             else:
                 mcs_ue_mask = mcs_ue_mask_eval
             mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
-        # total number of possible streams; not all of them might be active.
-        num_tx = tf.shape(active_tx)[1]
+        num_tx = active_tx.shape[1]
 
-        # mask pilots for pilotless communications
-        if self._sys_parameters.mask_pilots:
-            rg_type = self._rg.build_type_grid()
-            # add batch dim
-            rg_type = tf.expand_dims(rg_type, axis=0)
-            rg_type = tf.broadcast_to(rg_type, tf.shape(y))
-            y = tf.where(rg_type == 1, tf.constant(0.0, y.dtype), y)
+        if self.sys_parameters.mask_pilots:
+            rg_type = self.rg.build_type_grid()
+            rg_type = rg_type.unsqueeze(0).expand(y.shape)
+            y = torch.where(rg_type == 1, torch.tensor(0.0, dtype=y.dtype), y)
 
-        ##############################################
-        # Core Neural Receiver
-        ##############################################
-
-        # Reshaping to the expected shape
-        # [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
         y = y[:, 0]
-        y = tf.transpose(y, [0, 3, 2, 1])
-        y = tf.concat([tf.math.real(y), tf.math.imag(y)], axis=-1)
-        # Map showing the position of the nearest pilot for every user in time
-        # and frequency.
-        # This can be seen as a form of positional encoding
-        # [num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        pe = self._nearest_pilot_dist[:num_tx]
+        y = y.permute(0, 3, 2, 1)
+        y = torch.cat([y.real, y.imag], dim=-1)
 
-        # Calling the detector to compute LLRs.
-        # List of size num_it of tensors of LLRs with shape:
-        # llrs : [batch_size, num_tx, num_effective_subcarriers,
-        #       num_ofdm_symbols, num_bits_per_symbol]
-        # h_hats : [batch_size, num_tx, num_effective_subcarriers,
-        #       num_ofdm_symbols, 2*num_rx_ant]
+        pe = self.nearest_pilot_dist[:num_tx]
 
-        # cast to desired dtypes
-        y = tf.cast(y, self._nrx_dtype)
-        pe = tf.cast(pe, self._nrx_dtype)
-
+        y = y.to(self.dtype)
+        pe = pe.to(self.dtype)
         if h_hat_init is not None:
-            h_hat_init = tf.cast(h_hat_init, self._nrx_dtype)
-        active_tx = tf.cast(active_tx, self._nrx_dtype)
+            h_hat_init = h_hat_init.to(self.dtype)
+        active_tx = active_tx.to(self.dtype)
 
-        # and run the neural receiver
-        llrs_, h_hats_ = self._cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
+        llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
         indices = mcs_arr_eval
-
-        # list of lists; outer list separates iterations, inner list the MCSs
         llrs = []
-
         h_hats = []
-        # process each list entry (=iteration) individually
+
         for llrs_, h_hat_ in zip(llrs_, h_hats_):
-
-            h_hat_ = tf.cast(h_hat_, tf.float32)
-
-            # local llrs list to only process LLRs of MCS indices specified in
-            # mcs_arr_eval
+            h_hat_ = h_hat_.float()
             _llrs_ = []
-            # loop over all evaluated mcs indices
+
             for idx in indices:
-
-                # cast back to tf.float32 (if NRX uses quantization)
-                llrs_[idx] = tf.cast(llrs_[idx], tf.float32)
-
-                # llr : [batch_size, num_tx, num_effective_subcarriers,
-                #       num_ofdm_symbols, num_bits_per_symbol]
-
-                # Extract data-carrying REs
-                # Reshape to
-                # [batch_size, 1, num_tx, num_ofdm_symbols,
-                #   fft_size, num_bits_per_symbol]
-                llrs_[idx] = tf.transpose(llrs_[idx], [0, 1, 3, 2, 4])
-                llrs_[idx] = tf.expand_dims(llrs_[idx], axis=1)
-                # Need to pad LLRs as the RG demapper expects ``max_num_tx``
-                # users
-                # [batch_size, 1, max_num_tx, num_ofdm_symbols,
-                #   fft_size, num_bits_per_symbol]
-                # llr = tf.pad(llr, [ [0, 0], [0, 0],
-                #                    [0, self._max_num_tx-num_tx],
-                #                    [0,0], [0,0], [0, 0]])
-                # [batch_size, num_tx, 1, num_data_symbols, num_bit_per_symbols]
-                llrs_[idx] = self._rg_demapper(llrs_[idx])
+                llrs_[idx] = llrs_[idx].float()
+                llrs_[idx] = llrs_[idx].permute(0, 1, 3, 2, 4).unsqueeze(1)
+                llrs_[idx] = self.rg_demapper(llrs_[idx])
                 llrs_[idx] = llrs_[idx][:, :num_tx]
+                llrs_[idx] = torch.flatten(llrs_[idx], start_dim=-2)
 
-                # Keeping only the relevant users and the unique stream per user
-                # [batch_size, num_tx, 1, num_data_symbols*num_bit_per_symbols]
-                llrs_[idx] = flatten_last_dims(llrs_[idx], 2)
-
-                # Remove stream dimension, NOTE: does not support
-                # multiple-streams
-                # per user; conceptually the neural receiver does, but would
-                # require modified reshapes
-                if self._layer_demappers is None:
-                    llrs_[idx] = tf.squeeze(llrs_[idx], axis=-2)
+                if self.layer_demappers is None:
+                    llrs_[idx] = llrs_[idx].squeeze(-2)
                 else:
-                    llrs_[idx] = self._layer_demappers[idx](llrs_[idx])
+                    llrs_[idx] = self.layer_demappers[idx](llrs_[idx])
+
                 _llrs_.append(llrs_[idx])
 
-            # llr is of shape
-            # [batch_size, num_tx, num_data_symbols*num_bit_per_symbols]
-
-            # h_hat is of shape
-            # [batch_size, num_tx, num_effective_subcarriers, num_ofdm_symbols,
-            #   2*num_rx_ant]
             llrs.append(_llrs_)
             h_hats.append(h_hat_)
 
-        if self._training:
-
-            # Loss on data
-            loss_data = tf.constant(0.0, dtype=tf.float32)
+        if self.training:
+            loss_data = torch.tensor(0.0, dtype=torch.float32)
             for llrs_ in llrs:
-                for idx in range(len(indices)):
-                    loss_data_ = self._bce(bits[idx], llrs_[idx])
-
+                for idx, llr in enumerate(llrs_):
+                    loss_data_ = self.bce(llr, bits[idx])
                     mcs_ue_mask_ = expand_to_rank(
-                        tf.gather(mcs_ue_mask, indices=indices[idx], axis=2),
-                        tf.rank(loss_data_),
+                        mcs_ue_mask[:, :, indices[idx] : indices[idx] + 1],
+                        loss_data_.dim(),
                         axis=-1,
                     )
-
-                    # select data loss only for associated MCSs
-                    loss_data_ = tf.multiply(loss_data_, mcs_ue_mask_)
-
-                    # only focus on active users
+                    loss_data_ = loss_data_ * mcs_ue_mask_
                     active_tx_data = expand_to_rank(
-                        active_tx, tf.rank(loss_data_), axis=-1
+                        active_tx, loss_data_.dim(), axis=-1
                     )
-                    loss_data_ = tf.multiply(loss_data_, active_tx_data)
-                    # Average over batch, transmitters, and resource grid
-                    loss_data += tf.reduce_mean(loss_data_)
+                    loss_data_ = loss_data_ * active_tx_data
+                    loss_data += loss_data_.mean()
 
-            # Loss on channel estimation
-            loss_chest = tf.constant(0.0, dtype=tf.float32)
-            if h_hats is not None:  # h_hat might not be available
+            loss_chest = torch.tensor(0.0, dtype=torch.float32)
+            if h_hats is not None and h is not None:
                 for h_hat_ in h_hats:
-                    if h is not None:
-                        loss_chest += self._mse(h, h_hat_)
+                    loss_chest += self.mse(h, h_hat_)
+                active_tx_chest = expand_to_rank(active_tx, loss_chest.dim(), axis=-1)
+                loss_chest = loss_chest * active_tx_chest
+                loss_chest = loss_chest.mean()
 
-            # only focus on active users
-            active_tx_chest = expand_to_rank(active_tx, tf.rank(loss_chest), axis=-1)
-            loss_chest = tf.multiply(loss_chest, active_tx_chest)
-            # Average over batch, transmitters, and resource grid
-            loss_chest = tf.reduce_mean(loss_chest)
             return loss_data, loss_chest
         else:
-            # Only return the last iteration during inference
             return llrs[-1][0], h_hats[-1]
 
 
-class NeuralPUSCHReceiver(Layer):
-    # pylint: disable=line-too-long
-    r"""
-    Neural PUSCH Receiver extending the CGNNOFDM Layer with 5G NR capabilities.
-
-    This layer wraps the CGNNOFDM Layer such that it is 5G NR compatible.
-    It includes all required steps for Transportblock (TB)/FEC decoding
-    including scrambling and interleaving.
-
-    Remark: for training, the labels are re-encoded with the TB-Encoder and
-    thus the payload (transport block) information bits must be provided.
-    In most practical use-cases this simplifies the data acquisition.
-
-    Parameters
-    ----------
-    sys_parameters : Parameters
-        The system parameters.
-
-    training : boolean
-        Set to `True` if instantiated for training. Set to `False` otherwise.
-
-    Input
-    ------
-    (y, active_tx, [bits, h, mcs_ue_mask]) :
-        Tuple: last two inputs are only for training mode
-
-        y : [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size], tf.complex
-            The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        active_tx: [batch_size, num_tx], tf.float
-            Active user mask where each `0` indicates non-active users and `1`
-            indicates an active user.
-
-        bits : list of [[batch_size, num_tx, num_data_symbols*num_bits_per_symbol],
-                        tf.int]
-            Transmitted information (uncoded) bits for each evaluated MCS.
-            Only required for training to compute the loss function.
-
-        h : [batch_size, num_rx, num_rx_ant, num_tx, num_streams_per_tx,
-            num_ofdm_symbols, fft_size], tf.complex
-            Ground-truth channel impulse response.
-            Only required for training to compute the loss function.
-
-        mcs_ue_mask: [batch_size, max_num_tx, len(mcs_index)], tf.int32
-            One-hot mask that specifies the MCS index of each UE for each batch
-            sample. Only required for training to enable UE-specific MCS
-            association.
-
-    mcs_arr_eval : list with int elements
-        Selects the elements (indices) of the mcs_index array to process.
-        Defaults to [0]
-
-    mcs_ue_mask_eval : [batch_size, max_num_tx, len(mcs_index)], tf.int32, None
-        Optional additional parameter to specify an mcs_ue_mask for evaluation
-        (self._training=False).
-        Defaults to None, which internally assumes that all UEs are scheduled
-        with mcs_arr_eval[0]
-
-    Output
-    ------
-    Depending on the value of `training`:
-
-    If Training set to `False`
-        Inference only implemented for one MCS (first element in mcs_arr_eval)
-
-    (b_hat, h_hat_refined, h_hat, tb_crc_status) : tuple
-
-        b_hat : [batch_size, num_tx, tb_size], tf.float
-            Reconstructed transport block bits after decoding.
-
-        h_hat_refined, [batch_size, num_tx, num_effective_subcarriers,
-                    num_ofdm_symbols, 2*num_rx_ant]
-            Refined channel estimate from the NRX.
-
-        h_hat, [batch_size, num_tx, num_effective_subcarriers,
-                   num_ofdm_symbols, 2*num_rx_ant]
-            Initial channel estimate used for the NRX.
-
-        tb_crc_status: [batch_size, num_tx]
-            Status of the TB CRC for each decoded TB.
-
-    If Training set to `True`
-
-    (loss_data, loss_chest) : tuple
-
-        loss_data: tf.float
-            Binary cross-entropy loss on LLRs. Computed from active UEs and
-            their selected MCSs.
-
-        loss_chest: tf.float
-            Mean-squared-error (MSE) loss between channel estimates and ground
-            truth channel CFRs. Only relevant if double-readout is used.
-    """
-
-    def __init__(self, sys_parameters, training=False, **kwargs):
-
-        super().__init__(**kwargs)
-
+class NeuralPUSCHReceiver(nn.Module):
+    def __init__(self, sys_parameters, training=False):
+        super().__init__()
         self._sys_parameters = sys_parameters
-
         self._training = training
 
-        # init transport block enc/decoder
-        self._tb_encoders = []  # @TODO encoderS and decoderS
-        self._tb_decoders = []
-
+        # Initialize transport block encoders and decoders
+        self._tb_encoders = nn.ModuleList()
+        self._tb_decoders = nn.ModuleList()
         self._num_mcss_supported = len(sys_parameters.mcs_index)
+
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
-                self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
+                sys_parameters.transmitters[mcs_list_idx]._tb_encoder
             )
-
             self._tb_decoders.append(
                 TBDecoder(
                     self._tb_encoders[mcs_list_idx],
@@ -1481,21 +992,21 @@ class NeuralPUSCHReceiver(Layer):
                 )
             )
 
-        # Precoding matrix to post-process the ground-truth channel when
-        # training
-        #  [num_tx, num_tx_ant, num_layers = 1]
+        # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
-            self._precoding_mat = sys_parameters.transmitters[0]._precoder._w
+            self._precoding_mat = torch.tensor(
+                sys_parameters.transmitters[0]._precoder._w
+            )
         else:
-            self._precoding_mat = tf.ones(
-                [sys_parameters.max_num_tx, sys_parameters.num_antenna_ports, 1],
-                tf.complex64,
+            self._precoding_mat = torch.ones(
+                sys_parameters.max_num_tx,
+                sys_parameters.num_antenna_ports,
+                1,
+                dtype=torch.complex64,
             )
 
         # LS channel estimator
-        # rg independent of MCS index
         rg = sys_parameters.transmitters[0]._resource_grid
-        # get pc from first MCS and first Tx
         pc = sys_parameters.pusch_configs[0][0]
         self._ls_est = PUSCHLSChannelEstimator(
             resource_grid=rg,
@@ -1505,20 +1016,21 @@ class NeuralPUSCHReceiver(Layer):
             interpolation_type="nn",
         )
 
-        rg_type = rg.build_type_grid()[:, 0]  # One stream only
-        pilot_ind = tf.where(rg_type == 1)
-        self._pilot_ind = np.array(pilot_ind)
+        rg_type = rg.build_type_grid()[:, 0]
+        pilot_ind = torch.where(rg_type == 1)
+        self._pilot_ind = pilot_ind[0]
 
-        # required to remove layers
-        self._layer_demappers = []
+        # Layer demappers
+        self._layer_demappers = nn.ModuleList()
         for mcs_list_idx in range(self._num_mcss_supported):
             self._layer_demappers.append(
                 LayerDemapper(
-                    self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
+                    sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
                     sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
                 )
             )
 
+        # Neural receiver
         self._neural_rx = CGNNOFDM(
             sys_parameters,
             max_num_tx=sys_parameters.max_num_tx,
@@ -1533,105 +1045,53 @@ class NeuralPUSCHReceiver(Layer):
             layer_type_dense=sys_parameters.layer_type_dense,
             layer_type_conv=sys_parameters.layer_type_conv,
             layer_type_readout=sys_parameters.layer_type_readout,
-            dtype=sys_parameters.nrx_dtype,
+            dtype=getattr(torch, sys_parameters.nrx_dtype.name),
         )
 
     def estimate_channel(self, y, num_tx):
-
-        # y has shape
-        # [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
-
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
-                    "Cannot use initial channel estimator if " "pilots are masked."
+                    "Cannot use initial channel estimator if pilots are masked."
                 )
-            # [batch_size, num_rx, num_rx_ant, num_tx, num_streams_per_tx,
-            #    num_ofdm_symbols, num_effective_subcarriers]
-            # Dummy value for N0 as it is not used anyway.
-            h_hat, _ = self._ls_est([y, 1e-1])
-
-            # Reshaping to the expected shape
-            # [batch_size, num_tx, num_effective_subcarriers,
-            #       num_ofdm_symbols, 2*num_rx_ant]
+            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = tf.transpose(h_hat, [0, 2, 4, 3, 1])
-            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
-
-        elif self._sys_parameters.initial_chest == None:
+            h_hat = h_hat.permute(0, 2, 4, 3, 1)
+            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
+        elif self._sys_parameters.initial_chest is None:
             h_hat = None
-
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
-        # h : [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant,
-        #       num_ofdm_symbols, num_effective_subcarriers]
-
-        # Assume only one rx
-        # [batch_size, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols,
-        #   fft_size]
-        h = tf.squeeze(h, axis=1)
-
-        # Reshape h
-        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
-        #   num_rx_ant, num_tx_ant]
-        h = tf.transpose(h, perm=[0, 2, 5, 4, 1, 3])
-
-        # Multiply by precoding matrices to compute effective channels
-        # [1, num_tx, 1, 1, num_tx_ant, 1]
-        w = insert_dims(tf.expand_dims(self._precoding_mat, axis=0), 2, 2)
-        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
-        #   num_rx_ant]
-        h = tf.squeeze(tf.matmul(h, w), axis=-1)
-
-        # Complex-to-real
-        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
-        #   2*num_rx_ant]
-        h = tf.concat([tf.math.real(h), tf.math.imag(h)], axis=-1)
-
+        h = h.squeeze(1)
+        h = h.permute(0, 2, 5, 4, 1, 3)
+        w = self._precoding_mat.unsqueeze(0).unsqueeze(2).unsqueeze(2)
+        h = torch.matmul(h, w).squeeze(-1)
+        h = torch.cat([h.real, h.imag], dim=-1)
         return h
 
-    def call(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
-        """
-        Apply neural receiver.
-        """
-
-        # assume u is provided as input in training mode
+    def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
-            # re-encode bits in training mode to generate labels
-            # avoids the need for post-FEC bits as labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
-                b = [b]  # generate new list if b is not provided as list
+                b = [b]
             bits = []
             for idx in range(len(mcs_arr_eval)):
-                bits.append(
-                    self._sys_parameters.transmitters[mcs_arr_eval[idx]]._tb_encoder(
-                        b[idx]
-                    )
-                )
+                bits.append(self._tb_encoders[mcs_arr_eval[idx]](b[idx]))
 
-            # Initial channel estimation
-            num_tx = tf.shape(active_tx)[1]
+            num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
 
-            # Reshaping `h` to the expected shape and apply precoding matrices
-            # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
-            #   2*num_rx_ant]
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
 
-            # Apply neural receiver and return loss
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
             return losses
-
         else:
             y, active_tx = inputs
-
-            # Initial channel estimation
-            num_tx = tf.shape(active_tx)[1]
+            num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
 
             llr, h_hat_refined = self._neural_rx(
@@ -1640,9 +1100,7 @@ class NeuralPUSCHReceiver(Layer):
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
 
-            # apply TBDecoding
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
-
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
@@ -1654,321 +1112,164 @@ class NeuralPUSCHReceiver(Layer):
 # for Sionna-based simulations.
 
 
-class NRPreprocessing(Layer):
-    # pylint: disable=line-too-long
-    r"""
-    Pre-preprocessing layer for the neural receiver applying initial channel
-    estimation. In particular, the layer takes the channel estimates at pilot
-    positions and performs nearest neighbor interpolation on a "per PRB" basis.
-    As such it scales to arbitrary resource grid sizes.
+class NRPreprocessing(nn.Module):
+    """
+    Pre-preprocessing layer for the neural receiver applying initial channel estimation.
 
-    The input/output shapes are Aerial compatible and not directly compatible
-    with Sionna. The returned "resourcegrid of LLRs" can be further processed
-    using PyAerial.
+    This layer takes the channel estimates at pilot positions and performs nearest neighbor
+    interpolation on a "per PRB" basis. It scales to arbitrary resource grid sizes.
+
+    The input/output shapes are Aerial compatible and not directly compatible with Sionna.
+    The returned "resourcegrid of LLRs" can be further processed using PyAerial.
 
     Note that all operations are real-valued.
 
-    Parameters
+    Parameters:
     -----------
     num_tx : int
         Number of transmitters (i.e., independent streams)
 
-    Input
+    Input:
     ------
-    (y, h_hat, dmrs_ofdm_pos, dmrs_subcarrier_pos)
-    Tuple:
-
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], tf.float32
+    y : torch.Tensor
+        [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], float32
         The received OFDM resource grid after cyclic prefix removal and FFT.
-        Real and imaginary part are stacked in the rx_antenna direction.
-
-    h_hat : [bs, num_pilots, num_streams, 2*num_rx_ant], tf.float32
-        Channel estimates at pilot positions. Real and imaginary part are stacked in the rx_antenna direction.
-
-    dmrs_ofdm_pos: [num_tx, num_dmrs_symbols], tf.int
+        Real and imaginary parts are stacked in the rx_antenna direction.
+    h_hat : torch.Tensor
+        [bs, num_pilots, num_streams, 2*num_rx_ant], float32
+        Channel estimates at pilot positions. Real and imaginary parts are stacked in the rx_antenna direction.
+    dmrs_ofdm_pos : torch.Tensor
+        [num_tx, num_dmrs_symbols], int
         DMRS symbol positions within slot.
-
-    dmrs_subcarrier_pos: [num_tx, num_pilots_per_PRB], tf.int
+    dmrs_subcarrier_pos : torch.Tensor
+        [num_tx, num_pilots_per_PRB], int
         Pilot position per PRB.
 
-    Output
+    Output:
     -------
-    [h_hat, pe]: Tuple
-
-    h_hat : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
-             2*num_rx_ant], tf.float
+    h_hat : torch.Tensor
+        [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], float
         Channel estimate after nearest neighbor interpolation.
-
-    pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-        Map showing the position of the nearest pilot for every user in time
-        and frequency. This can be seen as a form of positional encoding.
+    pe : torch.Tensor
+        [num_tx, num_subcarriers, num_ofdm_symbols, 2], float
+        Map showing the position of the nearest pilot for every user in time and frequency.
+        This can be seen as a form of positional encoding.
     """
 
-    def __init__(self, num_tx, **kwargs):
-
-        super().__init__(**kwargs)
-
+    def __init__(self, num_tx):
+        super().__init__()
         self._num_tx = num_tx
         self._num_res_per_prb = 12  # fixed in 5G
 
     def _focc_removal(self, h_hat):
-        """
-        Apply FOCC removal to h_hat.
-
-        Parameters
-        ----------
-        h_hat: [bs, 2*num_rx_ants, num_layers, num_pilots], tf.complex64
-            Channel estimates at pilot positions.
-
-        Outputs
-        -------
-        h_hat: [bs, 2*num_rx_ants, num_layers, num_pilots], tf.complex64
-            Channel estimates at pilot positions after FOCC removal.
-        """
-
+        """Apply FOCC removal to h_hat."""
         shape = [-1, 2]
-        s = tf.shape(h_hat)
-        new_shape = tf.concat([s[:3], shape], 0)
-        # [bs, num_rx_ants, num_tx, num_pilots//2, 2]
-        h_hat = tf.reshape(h_hat, new_shape)
-
-        # [bs, num_rx_ants, num_tx, num_pilots//2, 1]
-        h_hat = tf.reduce_sum(h_hat, axis=-1, keepdims=True) / tf.cast(
-            2.0, dtype=h_hat.dtype
-        )
-        # [bs, num_rx_ants, num_tx, num_pilots//2, 2]
-
-        # we split into 2 as 4 was only required if we feed the zeroed/masked
-        # pilots as well. This is not the case in the Aerial format
-        # (only non-zero pilots are returned)
-        h_hat = tf.repeat(h_hat, 2, axis=-1)
-
-        # [bs, num_rx_ants, num_tx, num_pilots]
-        shape = [-1]
-        s = tf.shape(h_hat)
-        new_shape = tf.concat([s[:3], shape], 0)
-        h_ls = tf.reshape(h_hat, new_shape)
-
+        s = h_hat.shape
+        new_shape = s[:3] + shape
+        h_hat = h_hat.reshape(new_shape)
+        h_hat = torch.sum(h_hat, dim=-1, keepdim=True) / 2.0
+        h_hat = h_hat.repeat(1, 1, 1, 1, 2)
+        h_ls = h_hat.reshape(s[:3] + (-1,))
         return h_ls
 
     def _calculate_nn_indices(
         self, dmrs_ofdm_pos, dmrs_subcarrier_pos, num_ofdm_symbols, num_prbs
     ):
-        """
-        Calculates nearest neighbor interpolation indices for a single PRB.
-
-        Parameters
-        ----------
-        dmrs_ofdm_pos: [num_tx, num_dmrs_symbols], tf.int
-            DMRS symbol position within slot.
-
-        dmrs_subcarrier_pos: [num_tx, num_pilots_per_PRB], tf.int
-            Pilot position per PRB.
-
-        num_ofdm_symbol: tf.int
-            Number of OFDM symbols per slot.
-
-        num_prbs: tf.int
-            Number of allocated PRBs.
-
-        Output
-        ------
-        nn_idx : [num_tx, num_streams_per_tx, num_ofdm_symbols,
-                  num_effective_subcarriers=12], tf.int32
-            Indices of nearest pilot RG grid. Can be used for nearest neighbor
-            interpolation.
-
-        pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-            Map showing the position of the nearest pilot for every user in time
-            and frequency. This can be seen as a form of positional encoding.
-        """
-
-        re_pos = tf.meshgrid(
-            tf.range(self._num_res_per_prb), tf.range(num_ofdm_symbols)
+        """Calculate nearest neighbor interpolation indices for a single PRB."""
+        re_pos = torch.stack(
+            torch.meshgrid(
+                torch.arange(self._num_res_per_prb), torch.arange(num_ofdm_symbols)
+            ),
+            dim=-1,
         )
-        re_pos = tf.stack(re_pos, axis=-1)
-        # enable broadcasting for distance calculation
-        re_pos = tf.reshape(re_pos, (-1, 1, 2))
+        re_pos = re_pos.reshape(-1, 1, 2)
 
         pes = []
         nn_idxs = []
-        # calculate distance per tx
+
         for tx_idx in range(self._num_tx):
-            # Combining the coordinates into a single matrix
-            p_idx = tf.meshgrid(dmrs_subcarrier_pos[tx_idx], dmrs_ofdm_pos[tx_idx])
-            pilot_pos = tf.stack(p_idx, axis=-1)
-            # Reshaping to get a list of coordinate pairs
-            pilot_pos = tf.reshape(pilot_pos, (-1, 2))
+            pilot_pos = torch.stack(
+                torch.meshgrid(dmrs_subcarrier_pos[tx_idx], dmrs_ofdm_pos[tx_idx]),
+                dim=-1,
+            )
+            pilot_pos = pilot_pos.reshape(1, -1, 2)
 
-            pilot_pos = tf.reshape(pilot_pos, (1, -1, 2))
-            diff = tf.abs(re_pos - pilot_pos)
-            # Manhattan distance
-            dist = tf.reduce_sum(diff, axis=-1)
+            diff = torch.abs(re_pos - pilot_pos)
+            dist = torch.sum(diff, dim=-1)
+            nn_idx = torch.argmin(dist, dim=1)
+            nn_idx = nn_idx.reshape(1, 1, num_ofdm_symbols, self._num_res_per_prb)
 
-            # find indices of closes pilot
-            nn_idx = tf.argmin(dist, axis=1)
+            pe = torch.min(diff, dim=1)[0]
+            pe = pe.reshape(1, num_ofdm_symbols, self._num_res_per_prb, 2)
+            pe = pe.permute(0, 2, 1, 3)
 
-            # and bring into shape [num_tx, num_streams_per_tx,...
-            # ... num_ofdm_symbols,num_effective_subcarriers]
-            nn_idx = tf.reshape(nn_idx, (1, 1, num_ofdm_symbols, self._num_res_per_prb))
-
-            # [num_tx, num_subcarriers, num_ofdm_symbols, 2],
-            pe = tf.reduce_min(diff, axis=1)
-            pe = tf.reshape(pe, (1, num_ofdm_symbols, self._num_res_per_prb, 2))
-            pe = tf.transpose(pe, (0, 2, 1, 3))
-
-            # normalize per axis(t and f)
-            # remark leads to effect that in f dim, we have +/-1
+            pe = pe.float()
             p = []
-            pe = tf.cast(pe, tf.float32)
-
-            # ofdm symbol axis
-            pe_ = pe[..., 1:2]
-            pe_ -= tf.reduce_mean(pe_)  # ,axis=2, keepdims=True)
-            std_ = tf.math.reduce_std(pe_)  # ,axis=2, keepdims=True)
-            pe_ = tf.where(std_ > 0.0, pe_ / std_, pe_)
-            p.append(pe_)
-
-            # subcarrier axis
-            pe_ = pe[..., 0:1]
-            pe_ -= tf.reduce_mean(pe_)  # ,axis=1, keepdims=True)
-            std_ = tf.math.reduce_std(pe_)  # ,axis=1, keepdims=True)
-            pe_ = tf.where(std_ > 0.0, pe_ / std_, pe_)
-            p.append(pe_)
-
-            pe = tf.concat(p, axis=-1)
+            for i in range(2):
+                pe_ = pe[..., i : i + 1]
+                pe_ -= pe_.mean()
+                std_ = pe_.std()
+                pe_ = torch.where(std_ > 0, pe_ / std_, pe_)
+                p.append(pe_)
+            pe = torch.cat(p, dim=-1)
 
             pes.append(pe)
             nn_idxs.append(nn_idx)
 
-        pe = tf.concat(pes, axis=0)
-        pe = tf.tile(pe, (1, num_prbs, 1, 1))  # broadcasting over all PRBs
-        nn_idx = tf.concat(nn_idxs, axis=0)
-        nn_idx = tf.concat(nn_idxs, axis=0)
+        pe = torch.cat(pes, dim=0)
+        pe = pe.repeat(1, num_prbs, 1, 1)
+        nn_idx = torch.cat(nn_idxs, dim=0)
+
         return nn_idx, pe
 
     def _nn_interpolation(
         self, h_hat, num_ofdm_symbols, dmrs_ofdm_pos, dmrs_subcarrier_pos
     ):
-        """
-        Applies nearest neighbor interpolation of pilots to all data
-        symbols in the resource grid.
+        """Apply nearest neighbor interpolation of pilots to all data symbols in the resource grid."""
+        num_pilots_per_dmrs = dmrs_subcarrier_pos.shape[1]
+        num_prbs = h_hat.shape[-1] // (num_pilots_per_dmrs * dmrs_ofdm_pos.shape[-1])
 
-        Remark: NN interpolation is done per PRB.
+        s = h_hat.shape
+        h_hat = h_hat.reshape(s[:3] + (-1, num_pilots_per_dmrs))
+        h_hat = h_hat.permute(0, 1, 2, 4, 3)
+        h_hat = h_hat.reshape(s[:3] + (-1,))
 
-        Parameters
-        ----------
-        h_hat: [bs, 2*num_rx_ants, num_layers, num_pilots], tf.complex
-            Channel estimates at pilot locations
-
-        num_ofdm_symbols: tf.int
-            Total number of OFDM symbols per slot.
-
-        dmrs_ofdm_pos: [num_tx, num_dmrs_symbols], tf.int
-            DMRS symbol position within slot.
-
-        dmrs_subcarrier_pos: [num_tx, num_pilots_per_PRB], tf.int
-            Pilot position per PRB.
-
-        Output
-        ------
-        h_hat: [k, l, m, num_tx, num_streams_per_tx, num_ofdm_symbols,
-                num_effective_subcarriers], tf.complex
-            Interpolated channel estimates of the entire resource grid.
-
-        pe : [num_tx, num_subcarriers, num_ofdm_symbols, 2], tf.float
-            Map showing the position of the nearest pilot for every user in time
-            and frequency. This can be seen as a form of positional encoding.
-        """
-        # derive shapes from h_hat (and not y) as TRT has issues otherwise with
-        # dynamic input shapes
-        num_pilots_per_dmrs = tf.shape(dmrs_subcarrier_pos)[1]  # pilot symbols
-        num_prbs = tf.cast(
-            tf.shape(h_hat)[-1] / (num_pilots_per_dmrs * tf.shape(dmrs_ofdm_pos)[-1]),
-            tf.int32,
-        )
-
-        # permute input estimates such that the first half of pilots of the
-        # first PRB follows its second half (or third if multiple dmrs symbols)
-        s = tf.shape(h_hat)
-        h_hat = split_dim(h_hat, shape=(-1, num_pilots_per_dmrs), axis=3)
-        h_hat = split_dim(h_hat, shape=(-1, num_prbs), axis=3)
-        h_hat = tf.transpose(h_hat, (0, 1, 2, 4, 3, 5))
-        # flatten dims does not work with ONNX (partially unknown shapes)
-        # h_hat = flatten_dims(h_hat, 3, axis=3)
-        h_hat = tf.reshape(h_hat, s)
-
-        # bring into Sionna compatible shape
-        h_hat = tf.expand_dims(h_hat, axis=1)  # num_rx
-        h_hat = tf.expand_dims(h_hat, axis=4)  # num_streams_per_tx
-        perm = tf.roll(tf.range(tf.rank(h_hat)), -3, 0)
-        h_hat = tf.transpose(h_hat, perm)
-
-        # compute indices on the fly
-        ls_nn_ind, pe = self._calculate_nn_indices(
+        nn_idx, pe = self._calculate_nn_indices(
             dmrs_ofdm_pos, dmrs_subcarrier_pos, num_ofdm_symbols, num_prbs
         )
 
-        # reshape such that interpolation is applied to each PRB individually
-        s = tf.shape(h_hat)
-        h_hat_prb = split_dim(h_hat, shape=(num_prbs, -1), axis=2)
-        h_hat_prb = tf.transpose(h_hat_prb, (0, 1, 3, 2, 4, 5, 6))
-        # apply nn interpolation
-        outputs = tf.gather(h_hat_prb, ls_nn_ind, 2, batch_dims=2)
-        outputs = tf.transpose(outputs, (0, 1, 2, 4, 3, 5, 6, 7))
-
-        # and remove artificial "per-prb" dimension
-        s = tf.shape(outputs)
-        s = tf.concat(
-            (
-                tf.constant((-1,), tf.int32),
-                s[1:3],
-                tf.expand_dims(num_prbs * self._num_res_per_prb, axis=0),
-                s[5:],
-            ),
-            axis=0,
+        h_hat = (
+            h_hat.unsqueeze(3)
+            .unsqueeze(4)
+            .repeat(1, 1, 1, num_ofdm_symbols, self._num_res_per_prb * num_prbs, 1)
         )
-        # and combine all PRBs
-        outputs = tf.reshape(outputs, s)
+        nn_idx = nn_idx.unsqueeze(0).repeat(s[0], 1, 1, 1, num_prbs)
+        h_hat = torch.gather(
+            h_hat, dim=-1, index=nn_idx.unsqueeze(-1).repeat(1, 1, 1, 1, 1, s[1])
+        )
 
-        # Transpose outputs to bring batch_dims first again. New shape:
-        # [k, l, m, num_tx, num_streams_per_tx, num_ofdm_symbols,
-        #  num_effective_subcarriers]
-        perm = tf.roll(tf.range(tf.rank(outputs)), 3, 0)
-        h_hat = tf.transpose(outputs, perm)
+        h_hat = h_hat.permute(0, 2, 3, 4, 1, 5)
+        h_hat = h_hat.reshape(
+            s[0],
+            self._num_tx,
+            1,
+            num_ofdm_symbols,
+            self._num_res_per_prb * num_prbs,
+            s[1],
+        )
+
         return h_hat, pe
 
-    def call(self, inputs):
-
-        y, h_hat_ls, dmrs_ofdm_pos, dmrs_subcarrier_pos = inputs
-
-        num_ofdm_symbols = tf.shape(y)[2]
-
-        # shape y [bs, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-        # shape h_hat_ls [bs, num_pilots, num_layers, 2*num_rx_ants]
-        # desired shape of h_hat_ls [bs, 2*num_rx_ants, num_layers, num_pilots]
-        h_hat_ls = tf.transpose(h_hat_ls, (0, 3, 2, 1))
-
-        ######################
-        ### FOCC removal
-        ######################
-
-        h_hat_ls = self._focc_removal(h_hat_ls)
-
-        ######################
-        ### NN interpolator
-        ######################
-        # Interpolate channel estimates over the RG
+    def forward(self, y, h_hat, dmrs_ofdm_pos, dmrs_subcarrier_pos):
+        """Forward pass of the NRPreprocessing layer."""
+        num_ofdm_symbols = y.shape[2]
+        h_hat = self._focc_removal(h_hat)
         h_hat, pe = self._nn_interpolation(
-            h_hat_ls, num_ofdm_symbols, dmrs_ofdm_pos, dmrs_subcarrier_pos
+            h_hat, num_ofdm_symbols, dmrs_ofdm_pos, dmrs_subcarrier_pos
         )
-
-        # Reshaping to the expected shape
-        # [batch_size, num_tx, num_effective_subcarriers,
-        #       num_ofdm_symbols, 2*num_rx_ant]
-        h_hat = h_hat[:, 0, :, : self._num_tx, 0]
-        h_hat = tf.transpose(h_hat, [0, 2, 4, 3, 1])
-        return [h_hat, pe]
+        h_hat = h_hat.squeeze(2)
+        h_hat = h_hat.permute(0, 1, 3, 2, 4)
+        return h_hat, pe
 
 
 class NeuralReceiverONNX(Model):
