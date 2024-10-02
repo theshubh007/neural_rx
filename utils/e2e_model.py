@@ -20,11 +20,16 @@ from .neural_rx import NeuralPUSCHReceiver
 import torch
 import torch.nn as nn
 
+
 # Combine transmit signals from all MCSs
 def expand_to_rank(tensor, target_rank, axis=-1):
     while tensor.dim() < target_rank:
         tensor = tensor.unsqueeze(axis)
     return tensor
+
+
+def torch_to_tf(torch_tensor):
+    return tf.convert_to_tensor(torch_tensor.cpu().detach().numpy())
 
 
 class E2E_Model(nn.Module):
@@ -466,7 +471,7 @@ class E2E_Model(nn.Module):
         # Rate adjusted SNR; for e2e learning non-rate adjusted is sometimes
         # preferred as pilotless communications changes the rate.
         if self._sys_parameters.ebno:
-            print("flag4.1")
+
             # If pilot masking is used (for e2e), we account for the resulting
             # rate shift the assumption is that the empty REs are not
             # considered during transmission
@@ -486,11 +491,11 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._target_coderate,
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
-            print("flag4.2")
+
         else:
             # ebno_db is actually SNR when self._sys_parameters.ebno==False
             no = 10 ** (-ebno_db / 10)
-            print("flag4.3")
+
         # Update topology only required for 3GPP UMi/UMa models
         if self._sys_parameters.channel_type in ("UMi", "UMa"):
             print("flag4.4")
@@ -511,10 +516,28 @@ class E2E_Model(nn.Module):
 
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
-            y = self._channel([x, no])
+            # Convert PyTorch tensors to TensorFlow tensors
+            x_tf = torch_to_tf(x)
+            no_tf = torch_to_tf(no)
+
+            # Apply channel using TensorFlow tensors
+            y_tf = self._channel([x_tf, no_tf])
+
+            # Convert result back to PyTorch tensor
+            y = torch.from_numpy(y_tf.numpy()).to(x.device)
             h = torch.ones_like(y)  # Simple AWGN channel
         else:
-            y, h = self._channel([x, no])
+            # Convert PyTorch tensors to TensorFlow tensors
+            x_tf = torch_to_tf(x)
+            no_tf = torch_to_tf(no)
+
+            # Apply channel using TensorFlow tensors
+            y_tf, h_tf = self._channel([x_tf, no_tf])
+
+            # Convert results back to PyTorch tensors
+            y = torch.from_numpy(y_tf.numpy()).to(x.device)
+            h = torch.from_numpy(h_tf.numpy()).to(x.device)
+
         print("flag4.5")
         ###################################
         # Receiver
