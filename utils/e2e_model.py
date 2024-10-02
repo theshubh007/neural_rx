@@ -366,11 +366,19 @@ class E2E_Model(nn.Module):
             else:
                 x += x_torch * _mcs_ue_mask
         print("flag:10")
+        # Convert TensorFlow tensor to PyTorch tensor
+        active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
+
         # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
         a_tx = a_tx.expand_as(x)
 
-        x = torch.mul(x, a_tx.to(torch.complex64))
+        # Convert a_tx back to TensorFlow tensor if x is a TensorFlow tensor
+        if isinstance(x, tf.Tensor):
+            a_tx = tf.convert_to_tensor(a_tx.numpy())
+            x = tf.multiply(x, tf.cast(a_tx, tf.complex64))
+        else:
+            x = torch.mul(x, a_tx.to(torch.complex64))
         print("flag:11")
         ###################################
         # Channel
