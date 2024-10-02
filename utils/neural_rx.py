@@ -65,24 +65,35 @@ class StateInit(nn.Module):
         super().__init__()
 
         if layer_type == "sepconv":
-            conv_layer = lambda in_c, out_c: nn.Sequential(
-                nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
-                nn.Conv2d(in_c, out_c, kernel_size=1),
-            )
+
+            def conv_layer(in_channels, out_channels):
+                return nn.Sequential(
+                    nn.Conv2d(
+                        in_channels,
+                        in_channels,
+                        kernel_size=3,
+                        padding=1,
+                        groups=in_channels,
+                    ),
+                    nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                )
+
         elif layer_type == "conv":
-            conv_layer = nn.Conv2d
+
+            def conv_layer(in_channels, out_channels):
+                return nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
         else:
             raise NotImplementedError(f"Unknown layer_type '{layer_type}' selected.")
 
         # Hidden blocks
         self.hidden_conv = nn.ModuleList()
         for n in num_units:
-            self.hidden_conv.append(
-                nn.Sequential(conv_layer(n, n, kernel_size=3, padding=1), nn.ReLU())
-            )
+            self.hidden_conv.append(nn.Sequential(conv_layer(n, n), nn.ReLU()))
 
         # Output block
-        self.output_conv = conv_layer(num_units[-1], d_s, kernel_size=3, padding=1)
+        self.output_conv = conv_layer(num_units[-1], d_s)
+
         # Convert all layers to specified dtype
         self = self.to(dtype)
 
