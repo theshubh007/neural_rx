@@ -61,18 +61,18 @@ class StateInit(nn.Module):
         Initial state tensor for each user.
     """
 
-    def __init__(self, d_s, num_units, layer_type="sepconv"):
+    def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
         super().__init__()
 
         if layer_type == "sepconv":
-            conv_layer = nn.Sequential(
-                nn.Conv2d(1, 1, kernel_size=3, padding=1),
-                nn.Conv2d(1, 1, kernel_size=1),
+            conv_layer = lambda in_c, out_c: nn.Sequential(
+                nn.Conv2d(in_c, in_c, kernel_size=3, padding=1, groups=in_c),
+                nn.Conv2d(in_c, out_c, kernel_size=1),
             )
         elif layer_type == "conv":
             conv_layer = nn.Conv2d
         else:
-            raise NotImplementedError("Unknown layer_type selected.")
+            raise NotImplementedError(f"Unknown layer_type '{layer_type}' selected.")
 
         # Hidden blocks
         self.hidden_conv = nn.ModuleList()
@@ -83,6 +83,8 @@ class StateInit(nn.Module):
 
         # Output block
         self.output_conv = conv_layer(num_units[-1], d_s, kernel_size=3, padding=1)
+        # Convert all layers to specified dtype
+        self = self.to(dtype)
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
