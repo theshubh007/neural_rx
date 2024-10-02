@@ -10,8 +10,10 @@
 
 # Implements baseline receiver algorithms for performance evaluation
 
-from tensorflow.keras.layers import Layer
-import tensorflow as tf
+# from tensorflow.keras.layers import Layer
+# import tensorflow as tf
+import torch
+import torch.nn as nn
 from itertools import combinations
 import numpy as np
 
@@ -27,82 +29,31 @@ from sionna.nr import (
     PUSCHTransmitter,
     PUSCHLSChannelEstimator,
 )
-from sionna.utils import flatten_last_dims, split_dim, flatten_dims
+from sionna.utils import flatten_last_dims, flatten_dims
 
 
-class BaselineReceiver(Layer):
-    """BaselineReceiver class implementing a Sionna baseline receiver for
-    different receiver architectures.
-
-    Parameters
-    ----------
-    sys_parameters : Parameters
-        The system parameters.
-
-    dtype : tf.complex64, optional
-        The datatype of the layer, by default tf.complex64.
-
-    return_tb_status : bool, optional
-        Whether to return transport block status, by default False.
-
-    Input
-    -----
-    inputs : list
-        [y, no] or [y, h, no] (only for 'baseline_perf_csi')
-
-        y : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], tf.complex64
-            The received OFDM resource grid after cyclic prefix removal and FFT.
-
-        no : tf.float32
-            Noise variance. Must have broadcastable shape to ``y``.
-
-        h : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], tf.complex64
-            Channel frequency responses. Only required for for
-            'baseline_perf_csi'.
-
-    Output
-    ------
-    b_hat : [batch_size, num_tx, tb_size], tf.float32
-        The reconstructed payload bits of each transport block.
-
-    tb_crc_status : [batch_size, num_tx], tf.bool
-        Transport block CRC status. Only returned if `return_tb_status`
-        is `True`.
-    """
-
+class BaselineReceiver(nn.Module):
     def __init__(
         self,
         sys_parameters,
-        dtype=tf.complex64,
+        dtype=torch.complex64,
         return_tb_status=False,
         mcs_arr_eval_idx=0,
-        **kwargs,
     ):
-
-        super().__init__(dtype=dtype, **kwargs)
+        super().__init__()
         self._sys_parameters = sys_parameters
         self._return_tb_status = return_tb_status
+        self._dtype = dtype
 
-        ###################################
         # Channel Estimation
-        ###################################
         if sys_parameters.system in ("baseline_lmmse_kbest", "baseline_lmmse_lmmse"):
-            # Setup channel estimator for non-perfect CSI
-
-            # Use low-complexity LMMSE interpolator for large bandwidth parts
-            # to keep computational complexity feasible.
-            # Remark: dimensions are hard-coded in config. Needs to be adjusted
-            # for different PRB dimensions.
             if sys_parameters.n_size_bwp > 100:
                 print(
-                    "Applying low complexity LMMSE interpolation with "
-                    "reduced number of PRBs."
+                    "Applying low complexity LMMSE interpolation with reduced number of PRBs."
                 )
 
-                # use automatic mode to find suitable split parameters
                 if sys_parameters.lmmse_num_prbs == -1:
                     print("Using automatic LMMSE splitting.")
-                    # find prime factorial of num_prbs
                     n = sys_parameters.n_size_bwp
                     prime_factors = []
                     i = 2
@@ -113,11 +64,9 @@ class BaselineReceiver(Layer):
                             x /= i
                         else:
                             i += 1
-                    # find good split such that the number of PRBs is slightly
-                    # above 20; this is heuristic
+
                     n = len(prime_factors)
                     best_product = 1e6
-
                     for r in range(1, n + 1):
                         for subset in combinations(prime_factors, r):
                             product = np.prod(subset)
@@ -129,20 +78,17 @@ class BaselineReceiver(Layer):
                     reduction = (
                         sys_parameters.n_size_bwp / sys_parameters.lmmse_num_prbs
                     )
-
-                if int(reduction) != reduction:
-                    raise ValueError(
-                        "n_size_bwp must be multiple of " "lmmse_num_prbs."
-                    )
+                    if int(reduction) != reduction:
+                        raise ValueError(
+                            "n_size_bwp must be multiple of lmmse_num_prbs."
+                        )
                 reduction = int(reduction)
 
-                # modify PUSCH configs for reduced n_size_bwp
                 pcs = []
                 for i in range(0, len(sys_parameters.pusch_configs[mcs_arr_eval_idx])):
                     pc = sys_parameters.pusch_configs[mcs_arr_eval_idx][i].clone()
                     pc.carrier.n_size_grid = int(sys_parameters.n_size_bwp // reduction)
                     pcs.append(pc)
-
                 self._pusch_transmitter_small = PUSCHTransmitter(pcs)
                 resource_grid = self._pusch_transmitter_small.resource_grid
                 pilot_pattern = resource_grid.pilot_pattern
@@ -153,7 +99,6 @@ class BaselineReceiver(Layer):
                     offset : (resource_grid.fft_size + offset),
                 ]
                 cov_mat_space = sys_parameters.space_cov_mat
-
                 interpolator = LMMSEInterpolator(
                     pilot_pattern,
                     cov_mat_time=cov_mat_time,
@@ -161,7 +106,6 @@ class BaselineReceiver(Layer):
                     cov_mat_space=cov_mat_space,
                     order="s-f-t",
                 )
-                # 5G PUSCH version of low-complexity LMMSE
                 self._est = LowComplexityPUSCHLMSEEstimator(
                     resource_grid=sys_parameters.transmitters[
                         mcs_arr_eval_idx
@@ -174,7 +118,6 @@ class BaselineReceiver(Layer):
                     reduction=reduction,
                 )
             else:
-                # Use standard Sionna LMMSE interpolator over all PRBs
                 interpolator = LMMSEInterpolator(
                     sys_parameters.transmitters[
                         mcs_arr_eval_idx
@@ -216,20 +159,14 @@ class BaselineReceiver(Layer):
                 num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
                 interpolation_type="lin",
             )
-            # self._est = LSChannelEstimator(
-            #            resource_grid=sys_parameters.transmitters[mcs_arr_eval_idx]._resource_grid,
-            #            interpolation_type="lin")
         elif sys_parameters.system in (
             "baseline_perf_csi_lmmse",
             "baseline_perf_csi_kbest",
         ):
             self._est = "perfect"
 
-        ###################################
         # Detection
-        ###################################
         if sys_parameters.system in ("baseline_lmmse_kbest", "baseline_perf_csi_kbest"):
-            # Init K-best detector
             self._detector = KBestDetector(
                 "bit",
                 sys_parameters.max_num_tx,
@@ -247,7 +184,6 @@ class BaselineReceiver(Layer):
             "baseline_lslin_lmmse",
             "baseline_perf_csi_lmmse",
         ):
-            # Init LMMSE detector
             self._detector = LinearDetector(
                 "lmmse",
                 "bit",
@@ -260,9 +196,7 @@ class BaselineReceiver(Layer):
                 ]._num_bits_per_symbol,
             )
 
-        ###################################
         # Decoding
-        ###################################
         self._decoder = TBDecoder(
             sys_parameters.transmitters[mcs_arr_eval_idx]._tb_encoder,
             num_bp_iter=sys_parameters.num_bp_iter,
@@ -279,7 +213,7 @@ class BaselineReceiver(Layer):
             return_tb_crc_status=self._return_tb_status,
         )
 
-    def call(self, inputs):
+    def forward(self, inputs):
         if self._sys_parameters.system in (
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
@@ -332,7 +266,7 @@ class LowComplexityLMSEEstimator(LSChannelEstimator):
     """
 
     def __init__(self, resource_grid, interpolator, sys_parameters, reduction=4):
-        super().__init__(resource_grid, interpolator=interpolator, dtype=tf.complex64)
+        super().__init__(resource_grid, interpolator=interpolator)
         self._reduction = reduction
         self._sys_parameters = sys_parameters
 
@@ -341,13 +275,13 @@ class LowComplexityLMSEEstimator(LSChannelEstimator):
             0
         ]._resource_grid.num_pilot_symbols.numpy()
 
-    def call(self, inputs):
+    def forward(self, inputs):
         y, no = inputs
         y_eff = self._removed_nulled_scs(y)
         y_eff_flat = flatten_last_dims(y_eff)
-        y_pilots = tf.gather(y_eff_flat, self._pilot_ind, axis=-1)
+        y_pilots = torch.index_select(y_eff_flat, -1, self._pilot_ind)
         h_hat, err_var = self.estimate_at_pilot_locations(y_pilots, no)
-        err_var = tf.broadcast_to(err_var, tf.shape(h_hat))
+        err_var = err_var.expand_as(h_hat)
 
         # Hard-coded batch size
         s = [self._sys_parameters.batch_size_eval_small]
@@ -357,35 +291,33 @@ class LowComplexityLMSEEstimator(LSChannelEstimator):
         s.append(1)  # num_layer
         s.append(self._num_pilots)
 
-        h_hat = tf.ensure_shape(h_hat, shape=s)
-        err_var = tf.ensure_shape(err_var, shape=s)
+        h_hat = h_hat.view(*s)
+        err_var = err_var.view(*s)
 
-        h_hat2 = split_dim(h_hat, [2, -1], axis=tf.rank(h_hat) - 1)
-        h_hat3 = split_dim(h_hat2, [self._reduction, -1], axis=tf.rank(h_hat2) - 1)
-        h_hat4 = tf.transpose(h_hat3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
-        h_hat5 = flatten_last_dims(h_hat4, 2)
-        h_hat6 = flatten_dims(h_hat5, 2, 0)
+        h_hat = h_hat.view(*h_hat.shape[:-1], 2, -1)
+        h_hat = h_hat.view(*h_hat.shape[:-1], self._reduction, -1)
+        h_hat = h_hat.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        h_hat = flatten_last_dims(h_hat, 2)
+        h_hat = flatten_dims(h_hat, 2, 0)
 
-        err_var2 = split_dim(err_var, [2, -1], axis=tf.rank(err_var) - 1)
-        err_var3 = split_dim(
-            err_var2, [self._reduction, -1], axis=tf.rank(err_var2) - 1
-        )
-        err_var4 = tf.transpose(err_var3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
-        err_var5 = flatten_last_dims(err_var4, 2)
-        err_var6 = flatten_dims(err_var5, 2, 0)
+        err_var = err_var.view(*err_var.shape[:-1], 2, -1)
+        err_var = err_var.view(*err_var.shape[:-1], self._reduction, -1)
+        err_var = err_var.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        err_var = flatten_last_dims(err_var, 2)
+        err_var = flatten_dims(err_var, 2, 0)
 
-        h_hat7, err_var7 = self._interpol(h_hat6, err_var6)
-        err_var7 = tf.maximum(err_var7, tf.cast(0, err_var7.dtype))
+        h_hat, err_var = self._interpol(h_hat, err_var)
+        err_var = torch.clamp(err_var, min=0)
 
-        h_hat8 = split_dim(h_hat7, [self._reduction, -1], 0)
-        h_hat9 = tf.transpose(h_hat8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
-        h_hat10 = flatten_last_dims(h_hat9, 2)
+        h_hat = h_hat.view(self._reduction, -1, *h_hat.shape[1:])
+        h_hat = h_hat.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        h_hat = flatten_last_dims(h_hat, 2)
 
-        err_var8 = split_dim(err_var7, [self._reduction, -1], 0)
-        err_var9 = tf.transpose(err_var8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
-        err_var10 = flatten_last_dims(err_var9, 2)
+        err_var = err_var.view(self._reduction, -1, *err_var.shape[1:])
+        err_var = err_var.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        err_var = flatten_last_dims(err_var, 2)
 
-        return h_hat10, err_var10
+        return h_hat, err_var
 
 
 class LowComplexityPUSCHLMSEEstimator(PUSCHLSChannelEstimator):
@@ -441,7 +373,6 @@ class LowComplexityPUSCHLMSEEstimator(PUSCHLSChannelEstimator):
             dmrs_additional_position=dmrs_additional_position,
             num_cdm_groups_without_data=num_cdm_groups_without_data,
             interpolator=interpolator,
-            dtype=tf.complex64,
         )
         self._reduction = reduction
         self._sys_parameters = sys_parameters
@@ -451,48 +382,47 @@ class LowComplexityPUSCHLMSEEstimator(PUSCHLSChannelEstimator):
             0
         ]._resource_grid.num_pilot_symbols.numpy()
 
-    def call(self, inputs):
+    def forward(self, inputs):
         y, no = inputs
         y_eff = self._removed_nulled_scs(y)
         y_eff_flat = flatten_last_dims(y_eff)
-        y_pilots = tf.gather(y_eff_flat, self._pilot_ind, axis=-1)
+        y_pilots = torch.index_select(y_eff_flat, -1, self._pilot_ind)
         h_hat, err_var = self.estimate_at_pilot_locations(y_pilots, no)
-        err_var = tf.broadcast_to(err_var, tf.shape(h_hat))
+        err_var = err_var.expand_as(h_hat)
 
         # Hard-coded batch size
-        s = [self._sys_parameters.batch_size_eval_small]
-        s.append(1)  # num_rx
-        s.append(self._sys_parameters.num_rx_antennas)
-        s.append(self._sys_parameters.max_num_tx)
-        s.append(1)  # num_layer
-        s.append(self._num_pilots)
+        s = [
+            self._sys_parameters.batch_size_eval_small,
+            1,
+            self._sys_parameters.num_rx_antennas,
+            self._sys_parameters.max_num_tx,
+            1,
+            self._num_pilots,
+        ]
+        h_hat = h_hat.view(*s)
+        err_var = err_var.view(*s)
 
-        h_hat = tf.ensure_shape(h_hat, shape=s)
-        err_var = tf.ensure_shape(err_var, shape=s)
+        h_hat = h_hat.view(*h_hat.shape[:-1], 2, -1)
+        h_hat = h_hat.view(*h_hat.shape[:-1], self._reduction, -1)
+        h_hat = h_hat.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        h_hat = flatten_last_dims(h_hat, 2)
+        h_hat = flatten_dims(h_hat, 2, 0)
 
-        h_hat2 = split_dim(h_hat, [2, -1], axis=tf.rank(h_hat) - 1)
-        h_hat3 = split_dim(h_hat2, [self._reduction, -1], axis=tf.rank(h_hat2) - 1)
-        h_hat4 = tf.transpose(h_hat3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
-        h_hat5 = flatten_last_dims(h_hat4, 2)
-        h_hat6 = flatten_dims(h_hat5, 2, 0)
+        err_var = err_var.view(*err_var.shape[:-1], 2, -1)
+        err_var = err_var.view(*err_var.shape[:-1], self._reduction, -1)
+        err_var = err_var.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        err_var = flatten_last_dims(err_var, 2)
+        err_var = flatten_dims(err_var, 2, 0)
 
-        err_var2 = split_dim(err_var, [2, -1], axis=tf.rank(err_var) - 1)
-        err_var3 = split_dim(
-            err_var2, [self._reduction, -1], axis=tf.rank(err_var2) - 1
-        )
-        err_var4 = tf.transpose(err_var3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
-        err_var5 = flatten_last_dims(err_var4, 2)
-        err_var6 = flatten_dims(err_var5, 2, 0)
+        h_hat, err_var = self._interpol(h_hat, err_var)
+        err_var = torch.clamp(err_var, min=0)
 
-        h_hat7, err_var7 = self._interpol(h_hat6, err_var6)
-        err_var7 = tf.maximum(err_var7, tf.cast(0, err_var7.dtype))
+        h_hat = h_hat.view(self._reduction, -1, *h_hat.shape[1:])
+        h_hat = h_hat.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        h_hat = flatten_last_dims(h_hat, 2)
 
-        h_hat8 = split_dim(h_hat7, [self._reduction, -1], 0)
-        h_hat9 = tf.transpose(h_hat8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
-        h_hat10 = flatten_last_dims(h_hat9, 2)
+        err_var = err_var.view(self._reduction, -1, *err_var.shape[1:])
+        err_var = err_var.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        err_var = flatten_last_dims(err_var, 2)
 
-        err_var8 = split_dim(err_var7, [self._reduction, -1], 0)
-        err_var9 = tf.transpose(err_var8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
-        err_var10 = flatten_last_dims(err_var9, 2)
-
-        return h_hat10, err_var10
+        return h_hat, err_var
