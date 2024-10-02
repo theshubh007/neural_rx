@@ -983,22 +983,32 @@ class CGNNOFDM(nn.Module):
 
         pilot_indices = pilot_pattern.pilot_indices
 
-        subcarrier_indices = torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
-        symbol_indices = torch.arange(num_ofdm_symbols).unsqueeze(0).expand(num_subcarriers, -1)
+        subcarrier_indices = (
+            torch.arange(num_subcarriers).unsqueeze(1).expand(-1, num_ofdm_symbols)
+        )
+        symbol_indices = (
+            torch.arange(num_ofdm_symbols).unsqueeze(0).expand(num_subcarriers, -1)
+        )
 
-        nearest_pilot_dist = torch.zeros(self.max_num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        nearest_pilot_dist = torch.zeros(
+            self.max_num_tx, num_subcarriers, num_ofdm_symbols, 2
+        )
 
         for tx in range(self.max_num_tx):
             tx_pilot_indices = pilot_indices[tx]
             for sc in range(num_subcarriers):
                 for sym in range(num_ofdm_symbols):
                     if [sc, sym] in tx_pilot_indices:
-                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([0., 0.])
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([0.0, 0.0])
                     else:
-                        distances = torch.sqrt((subcarrier_indices - sc)**2 + (symbol_indices - sym)**2)
+                        distances = torch.sqrt(
+                            (subcarrier_indices - sc) ** 2 + (symbol_indices - sym) ** 2
+                        )
                         min_distance, min_index = torch.min(distances, dim=None)
                         nearest_pilot = tx_pilot_indices[min_index]
-                        nearest_pilot_dist[tx, sc, sym] = torch.tensor([sc - nearest_pilot[0], sym - nearest_pilot[1]]).float()
+                        nearest_pilot_dist[tx, sc, sym] = torch.tensor(
+                            [sc - nearest_pilot[0], sym - nearest_pilot[1]]
+                        ).float()
 
         return nearest_pilot_dist
 
@@ -1026,6 +1036,10 @@ class CGNNOFDM(nn.Module):
         y = y.permute(0, 3, 2, 1)
         y = torch.cat([y.real, y.imag], dim=-1)
 
+        if self.nearest_pilot_dist is None:
+          # Compute nearest_pilot_dist on-the-fly if it's None
+            self.nearest_pilot_dist = self._compute_nearest_pilot_dist()
+        
         pe = self.nearest_pilot_dist[:num_tx]
 
         y = y.to(self.dtype)
