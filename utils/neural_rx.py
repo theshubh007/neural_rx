@@ -637,7 +637,20 @@ class CGNN(nn.Module):
         dtype=torch.float32,
     ):
         super().__init__()
-
+        # Add this line
+        self.iterations = nn.ModuleList(
+            [
+                CGNNIt(
+                    d_s,
+                    num_units_agg[i],
+                    num_units_state[i],
+                    layer_type_dense=layer_type_dense,
+                    layer_type_conv=layer_type_conv,
+                    dtype=dtype,
+                )
+                for i in range(num_it)
+            ]
+        )
         self.training = training
         self.apply_multiloss = apply_multiloss
         self.var_mcs_masking = var_mcs_masking
