@@ -555,7 +555,9 @@ class E2E_Model(nn.Module):
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
         ):
+            print("flag4.6")
             b_hat = self._receiver([y, no])
+            print("flag4.7")
             if self._return_tb_status:
                 b_hat, tb_crc_status = b_hat
 
@@ -565,6 +567,7 @@ class E2E_Model(nn.Module):
             # return b[0] and b_hat only for active DMRS ports
             # b only holds bits corresponding to MCS indices specified
             # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
+            print("flag4.8")
             return self._mask_active_dmrs(
                 b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
             )
