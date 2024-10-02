@@ -342,51 +342,34 @@ class E2E_Model(nn.Module):
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
-        # Convert mcs_ue_mask to PyTorch tensor if it's not already
-        mcs_ue_mask = (
-            SionnaWrapper.tf_to_torch(mcs_ue_mask)
-            if isinstance(mcs_ue_mask, tf.Tensor)
-            else mcs_ue_mask
-        )
+        # Convert TensorFlow tensors to PyTorch tensors
+        mcs_ue_mask_torch = torch.from_numpy(mcs_ue_mask.numpy())
+        active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
 
         _mcs_ue_mask = (
-            mcs_ue_mask[:, :, mcs_arr_eval[0]]
+            mcs_ue_mask_torch[:, :, mcs_arr_eval[0]]
             .unsqueeze(-1)
             .unsqueeze(-1)
             .repeat(1, 1, 1, 1, 1)
             .to(torch.complex64)
         )
-        # Convert _mcs_ue_mask back to TensorFlow tensor
-        _mcs_ue_mask_tf = SionnaWrapper.torch_to_tf(_mcs_ue_mask)
-
-        # Use TensorFlow operations for Sionna components
-        x = tf.multiply(_mcs_ue_mask_tf, self._transmitters[mcs_arr_eval[0]](b[0]))
+        # Assuming self._transmitters[mcs_arr_eval[0]] is a Sionna component
+        x_tf = self._transmitters[mcs_arr_eval[0]](b[0])
+        x = torch.from_numpy(x_tf.numpy()) * _mcs_ue_mask
 
         for idx in range(1, len(mcs_arr_eval)):
             _mcs_ue_mask = (
-                mcs_ue_mask[:, :, mcs_arr_eval[idx]]
+                mcs_ue_mask_torch[:, :, mcs_arr_eval[idx]]
                 .unsqueeze(-1)
                 .unsqueeze(-1)
                 .repeat(1, 1, 1, 1, 1)
                 .to(torch.complex64)
             )
-            _mcs_ue_mask_tf = SionnaWrapper.torch_to_tf(_mcs_ue_mask)
-            x = x + tf.multiply(
-                _mcs_ue_mask_tf, self._transmitters[mcs_arr_eval[idx]](b[idx])
-            )
+            x_tf = self._transmitters[mcs_arr_eval[idx]](b[idx])
+            x += torch.from_numpy(x_tf.numpy()) * _mcs_ue_mask
 
-        # Convert active_dmrs to PyTorch if it's not already
-        active_dmrs = (
-            SionnaWrapper.tf_to_torch(active_dmrs)
-            if isinstance(active_dmrs, tf.Tensor)
-            else active_dmrs
-        )
-
-        a_tx = expand_to_rank(active_dmrs, x.shape.rank, axis=-1)
-        a_tx_tf = SionnaWrapper.torch_to_tf(a_tx.to(torch.complex64))
-
-        x = tf.multiply(x, a_tx_tf)
-        print("flag:9")
+        a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
+        x = torch.mul(x, a_tx.to(torch.complex64))
 
         ###################################
         # Channel
@@ -420,7 +403,6 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._target_coderate,
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
-            print("flag:10")
 
         else:
             # ebno_db is actually SNR when self._sys_parameters.ebno==False
@@ -443,7 +425,6 @@ class E2E_Model(nn.Module):
             )  # disable indoor users
             self._sys_parameters.channel_model.set_topology(*topology)
 
-        print("flag:11")
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
             y = self._channel([x, no])
