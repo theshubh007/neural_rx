@@ -626,37 +626,40 @@ class ReadoutChEst(nn.Module):
     def __init__(self, num_rx_ant, num_units, layer_type="linear", dtype=torch.float32):
         super().__init__()
 
-        if layer_type != "linear":
-            raise NotImplementedError("Only linear layer type is currently supported.")
-
+        self.layer_type = layer_type
         self.layers = nn.ModuleList()
-        for n in num_units:
-            self.layers.append(nn.Linear(n, n, dtype=dtype))
-            self.layers.append(nn.ReLU())
 
-        self.output_layer = nn.Linear(num_units[-1], 2 * num_rx_ant, dtype=dtype)
+        if layer_type == "linear":
+            for n in num_units:
+                self.layers.append(nn.Linear(n, n, dtype=dtype))
+                self.layers.append(nn.ReLU())
+            self.output_layer = nn.Linear(num_units[-1], 2 * num_rx_ant, dtype=dtype)
+        elif layer_type == "conv1d":
+            for n in num_units:
+                self.layers.append(nn.Conv1d(n, n, kernel_size=1, dtype=dtype))
+                self.layers.append(nn.ReLU())
+            self.output_layer = nn.Conv1d(
+                num_units[-1], 2 * num_rx_ant, kernel_size=1, dtype=dtype
+            )
+        else:
+            raise NotImplementedError(
+                f"Layer type '{layer_type}' is not supported. Use 'linear' or 'conv1d'."
+            )
 
     def forward(self, s):
-        """
-        Forward pass of the ReadoutChEst module.
-
-        Parameters
-        ----------
-        s : torch.Tensor
-            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-            State vector
-
-        Returns
-        -------
-        torch.Tensor
-            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-            Channel estimate for each stream
-        """
         z = s
+        if self.layer_type == "conv1d":
+            z = z.transpose(1, 2)  # Adjust for Conv1d input shape
+
         for layer in self.layers:
             z = layer(z)
-        h_hat = self.output_layer(z)
-        return h_hat
+
+        z = self.output_layer(z)
+
+        if self.layer_type == "conv1d":
+            z = z.transpose(1, 2)  # Adjust back to original shape
+
+        return z
 
 
 class CGNN(nn.Module):
