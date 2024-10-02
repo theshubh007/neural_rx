@@ -17,6 +17,7 @@ from sionna.channel import gen_single_sector_topology
 from sionna.utils import BinarySource, ebnodb2no, expand_to_rank, log10
 from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
+import numpy as np
 import torch
 from torch import nn
 
@@ -375,13 +376,14 @@ class E2E_Model(nn.Module):
         print("flag:10")
 
         # Check if x is a TensorFlow tensor or PyTorch tensor
-        def expand_as(tensor, target):
-            if isinstance(tensor, tf.Tensor):
-                return tf.broadcast_to(tensor, tf.shape(target))
-            else:
-                return tensor.expand_as(target)
-
-        a_tx = expand_as(a_tx, x)
+        a_tx = a_tx.numpy()
+        x_shape = x.shape if isinstance(x, torch.Tensor) else x.numpy().shape
+        a_tx = np.broadcast_to(a_tx, x_shape)
+        a_tx = (
+            torch.from_numpy(a_tx)
+            if isinstance(x, torch.Tensor)
+            else tf.convert_to_tensor(a_tx)
+        )
 
         # Perform the multiplication
         if isinstance(x, tf.Tensor):
