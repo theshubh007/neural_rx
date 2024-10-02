@@ -10,9 +10,17 @@
 
 ##### Neural Receiver #####
 
-# import tensorflow as tf
-# from tensorflow.keras import Model
-# from tensorflow.keras.layers import Layer
+import tensorflow as tf
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
+from sionna.utils import (
+    flatten_dims,
+    split_dim,
+    flatten_last_dims,
+    insert_dims,
+    expand_to_rank,
+)
+import numpy as np
 import torch
 from torch import nn
 from sionna.utils import flatten_dims, split_dim, flatten_last_dims, expand_to_rank
@@ -1002,73 +1010,161 @@ class LayerDemapperWrapper(nn.Module):
         return torch.from_numpy(self.layer_demapper(x.cpu().numpy()).numpy())
 
 
-class NeuralPUSCHReceiver(nn.Module):
+class NeuralPUSCHReceiver(Layer):
+    # pylint: disable=line-too-long
+    r"""
+    Neural PUSCH Receiver extending the CGNNOFDM Layer with 5G NR capabilities.
+
+    This layer wraps the CGNNOFDM Layer such that it is 5G NR compatible.
+    It includes all required steps for Transportblock (TB)/FEC decoding
+    including scrambling and interleaving.
+
+    Remark: for training, the labels are re-encoded with the TB-Encoder and
+    thus the payload (transport block) information bits must be provided.
+    In most practical use-cases this simplifies the data acquisition.
+
+    Parameters
+    ----------
+    sys_parameters : Parameters
+        The system parameters.
+
+    training : boolean
+        Set to `True` if instantiated for training. Set to `False` otherwise.
+
+    Input
+    ------
+    (y, active_tx, [bits, h, mcs_ue_mask]) :
+        Tuple: last two inputs are only for training mode
+
+        y : [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size], tf.complex
+            The received OFDM resource grid after cyclic prefix removal and FFT.
+
+        active_tx: [batch_size, num_tx], tf.float
+            Active user mask where each `0` indicates non-active users and `1`
+            indicates an active user.
+
+        bits : list of [[batch_size, num_tx, num_data_symbols*num_bits_per_symbol],
+                        tf.int]
+            Transmitted information (uncoded) bits for each evaluated MCS.
+            Only required for training to compute the loss function.
+
+        h : [batch_size, num_rx, num_rx_ant, num_tx, num_streams_per_tx,
+            num_ofdm_symbols, fft_size], tf.complex
+            Ground-truth channel impulse response.
+            Only required for training to compute the loss function.
+
+        mcs_ue_mask: [batch_size, max_num_tx, len(mcs_index)], tf.int32
+            One-hot mask that specifies the MCS index of each UE for each batch
+            sample. Only required for training to enable UE-specific MCS
+            association.
+
+    mcs_arr_eval : list with int elements
+        Selects the elements (indices) of the mcs_index array to process.
+        Defaults to [0]
+
+    mcs_ue_mask_eval : [batch_size, max_num_tx, len(mcs_index)], tf.int32, None
+        Optional additional parameter to specify an mcs_ue_mask for evaluation
+        (self._training=False).
+        Defaults to None, which internally assumes that all UEs are scheduled
+        with mcs_arr_eval[0]
+
+    Output
+    ------
+    Depending on the value of `training`:
+
+    If Training set to `False`
+        Inference only implemented for one MCS (first element in mcs_arr_eval)
+
+    (b_hat, h_hat_refined, h_hat, tb_crc_status) : tuple
+
+        b_hat : [batch_size, num_tx, tb_size], tf.float
+            Reconstructed transport block bits after decoding.
+
+        h_hat_refined, [batch_size, num_tx, num_effective_subcarriers,
+                    num_ofdm_symbols, 2*num_rx_ant]
+            Refined channel estimate from the NRX.
+
+        h_hat, [batch_size, num_tx, num_effective_subcarriers,
+                   num_ofdm_symbols, 2*num_rx_ant]
+            Initial channel estimate used for the NRX.
+
+        tb_crc_status: [batch_size, num_tx]
+            Status of the TB CRC for each decoded TB.
+
+    If Training set to `True`
+
+    (loss_data, loss_chest) : tuple
+
+        loss_data: tf.float
+            Binary cross-entropy loss on LLRs. Computed from active UEs and
+            their selected MCSs.
+
+        loss_chest: tf.float
+            Mean-squared-error (MSE) loss between channel estimates and ground
+            truth channel CFRs. Only relevant if double-readout is used.
+    """
+
     def __init__(self, sys_parameters, training=False, **kwargs):
-        super().__init__()
+
+        super().__init__(**kwargs)
 
         self._sys_parameters = sys_parameters
+
         self._training = training
 
         # init transport block enc/decoder
-        self._tb_encoders = nn.ModuleList()
-        self._tb_decoders = nn.ModuleList()
+        self._tb_encoders = []  # @TODO encoderS and decoderS
+        self._tb_decoders = []
 
         self._num_mcss_supported = len(sys_parameters.mcs_index)
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
-                TBEncoderWrapper(
-                    self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
-                )
+                self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
             )
+
             self._tb_decoders.append(
-                TBDecoderWrapper(
-                    TBDecoder(
-                        self._tb_encoders[mcs_list_idx].tb_encoder,
-                        num_bp_iter=sys_parameters.num_bp_iter,
-                        cn_type=sys_parameters.cn_type,
-                    )
+                TBDecoder(
+                    self._tb_encoders[mcs_list_idx],
+                    num_bp_iter=sys_parameters.num_bp_iter,
+                    cn_type=sys_parameters.cn_type,
                 )
             )
 
-        # Precoding matrix
+        # Precoding matrix to post-process the ground-truth channel when
+        # training
+        #  [num_tx, num_tx_ant, num_layers = 1]
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
-            self._precoding_mat = torch.from_numpy(
-                sys_parameters.transmitters[0]._precoder._w.numpy()
-            )
+            self._precoding_mat = sys_parameters.transmitters[0]._precoder._w
         else:
-            self._precoding_mat = torch.ones(
-                sys_parameters.max_num_tx,
-                sys_parameters.num_antenna_ports,
-                1,
-                dtype=torch.complex64,
+            self._precoding_mat = tf.ones(
+                [sys_parameters.max_num_tx, sys_parameters.num_antenna_ports, 1],
+                tf.complex64,
             )
 
         # LS channel estimator
+        # rg independent of MCS index
         rg = sys_parameters.transmitters[0]._resource_grid
+        # get pc from first MCS and first Tx
         pc = sys_parameters.pusch_configs[0][0]
-        self._ls_est = PUSCHLSChannelEstimatorWrapper(
-            PUSCHLSChannelEstimator(
-                resource_grid=rg,
-                dmrs_length=pc.dmrs.length,
-                dmrs_additional_position=pc.dmrs.additional_position,
-                num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
-                interpolation_type="nn",
-            )
+        self._ls_est = PUSCHLSChannelEstimator(
+            resource_grid=rg,
+            dmrs_length=pc.dmrs.length,
+            dmrs_additional_position=pc.dmrs.additional_position,
+            num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
+            interpolation_type="nn",
         )
 
-        rg_type = torch.from_numpy(rg.build_type_grid().numpy())[:, 0]
-        pilot_ind = torch.where(rg_type == 1)
-        self._pilot_ind = pilot_ind[0].numpy()
+        rg_type = rg.build_type_grid()[:, 0]  # One stream only
+        pilot_ind = tf.where(rg_type == 1)
+        self._pilot_ind = np.array(pilot_ind)
 
-        # Layer demappers
-        self._layer_demappers = nn.ModuleList()
+        # required to remove layers
+        self._layer_demappers = []
         for mcs_list_idx in range(self._num_mcss_supported):
             self._layer_demappers.append(
-                LayerDemapperWrapper(
-                    LayerDemapper(
-                        self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
-                        sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
-                    )
+                LayerDemapper(
+                    self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
+                    sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
                 )
             )
 
@@ -1086,53 +1182,105 @@ class NeuralPUSCHReceiver(nn.Module):
             layer_type_dense=sys_parameters.layer_type_dense,
             layer_type_conv=sys_parameters.layer_type_conv,
             layer_type_readout=sys_parameters.layer_type_readout,
-            # dtype=sys_parameters.nrx_dtype,
+            dtype=sys_parameters.nrx_dtype,
         )
 
     def estimate_channel(self, y, num_tx):
+
+        # y has shape
+        # [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
+
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
-                    "Cannot use initial channel estimator if pilots are masked."
+                    "Cannot use initial channel estimator if " "pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
+            # [batch_size, num_rx, num_rx_ant, num_tx, num_streams_per_tx,
+            #    num_ofdm_symbols, num_effective_subcarriers]
+            # Dummy value for N0 as it is not used anyway.
+            h_hat, _ = self._ls_est([y, 1e-1])
+
+            # Reshaping to the expected shape
+            # [batch_size, num_tx, num_effective_subcarriers,
+            #       num_ofdm_symbols, 2*num_rx_ant]
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
-        elif self._sys_parameters.initial_chest is None:
+            h_hat = tf.transpose(h_hat, [0, 2, 4, 3, 1])
+            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
+
+        elif self._sys_parameters.initial_chest == None:
             h_hat = None
+
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
-        h = h.squeeze(1)
-        h = h.permute(0, 2, 5, 4, 1, 3)
-        w = self._precoding_mat.unsqueeze(0).unsqueeze(2).unsqueeze(2)
-        h = torch.matmul(h, w).squeeze(-1)
-        h = torch.cat([h.real, h.imag], dim=-1)
+        # h : [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant,
+        #       num_ofdm_symbols, num_effective_subcarriers]
+
+        # Assume only one rx
+        # [batch_size, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols,
+        #   fft_size]
+        h = tf.squeeze(h, axis=1)
+
+        # Reshape h
+        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
+        #   num_rx_ant, num_tx_ant]
+        h = tf.transpose(h, perm=[0, 2, 5, 4, 1, 3])
+
+        # Multiply by precoding matrices to compute effective channels
+        # [1, num_tx, 1, 1, num_tx_ant, 1]
+        w = insert_dims(tf.expand_dims(self._precoding_mat, axis=0), 2, 2)
+        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
+        #   num_rx_ant]
+        h = tf.squeeze(tf.matmul(h, w), axis=-1)
+
+        # Complex-to-real
+        # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
+        #   2*num_rx_ant]
+        h = tf.concat([tf.math.real(h), tf.math.imag(h)], axis=-1)
+
         return h
 
-    def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+    def call(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+        """
+        Apply neural receiver.
+        """
+
+        # assume u is provided as input in training mode
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
+            # re-encode bits in training mode to generate labels
+            # avoids the need for post-FEC bits as labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
-                b = [b]
+                b = [b]  # generate new list if b is not provided as list
             bits = []
             for idx in range(len(mcs_arr_eval)):
-                bits.append(self._tb_encoders[mcs_arr_eval[idx]](b[idx]))
+                bits.append(
+                    self._sys_parameters.transmitters[mcs_arr_eval[idx]]._tb_encoder(
+                        b[idx]
+                    )
+                )
 
-            num_tx = active_tx.shape[1]
+            # Initial channel estimation
+            num_tx = tf.shape(active_tx)[1]
             h_hat = self.estimate_channel(y, num_tx)
 
+            # Reshaping `h` to the expected shape and apply precoding matrices
+            # [batch size, num_tx, num_ofdm_symbols, num_effective_subcarriers,
+            #   2*num_rx_ant]
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
 
+            # Apply neural receiver and return loss
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
             return losses
+
         else:
             y, active_tx = inputs
-            num_tx = active_tx.shape[1]
+
+            # Initial channel estimation
+            num_tx = tf.shape(active_tx)[1]
             h_hat = self.estimate_channel(y, num_tx)
 
             llr, h_hat_refined = self._neural_rx(
@@ -1141,7 +1289,9 @@ class NeuralPUSCHReceiver(nn.Module):
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
 
+            # apply TBDecoding
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
+
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
