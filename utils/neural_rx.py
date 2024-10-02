@@ -14,6 +14,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import Layer
 import torch
 from torch import nn
+from numpy import np
 from sionna.utils import flatten_dims, split_dim, flatten_last_dims, expand_to_rank
 from sionna.utils import insert_dims
 from sionna.ofdm import ResourceGridDemapper
@@ -1109,6 +1110,7 @@ class NeuralPUSCHReceiver(Layer):
         self._tb_decoders = []
 
         self._num_mcss_supported = len(sys_parameters.mcs_index)
+        print("NeuralPUSCHReceiver init")
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
                 self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
@@ -1236,7 +1238,7 @@ class NeuralPUSCHReceiver(Layer):
         """
         Apply neural receiver.
         """
-
+        print("NeuralPUSCHReceiver call")
         # assume u is provided as input in training mode
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
