@@ -11,8 +11,7 @@
 ##### Neural Receiver #####
 
 import tensorflow as tf
-from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
+from tensorflow.keras.layers import Layer
 from sionna.utils import (
     flatten_dims,
     split_dim,
@@ -23,7 +22,6 @@ from sionna.utils import (
 import numpy as np
 import torch
 from torch import nn
-from sionna.utils import flatten_dims, split_dim, flatten_last_dims, expand_to_rank
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
@@ -1244,7 +1242,7 @@ class NeuralPUSCHReceiver(Layer):
         """
         Apply neural receiver.
         """
-
+        print("flag: NeuralPUSCHReceiver call")
         # assume u is provided as input in training mode
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
