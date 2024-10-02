@@ -530,36 +530,63 @@ class ReadoutLLRs(nn.Module):
     ):
         super().__init__()
 
-        if layer_type != "linear":
-            raise NotImplementedError("Only linear layer type is currently supported.")
-
         self.layers = nn.ModuleList()
-        for n in num_units:
-            self.layers.append(nn.Linear(n, n, dtype=dtype))
-            self.layers.append(nn.ReLU())
+        in_features = num_units[
+            0
+        ]  # Assume the input size is the first element of num_units
 
-        self.output_layer = nn.Linear(num_units[-1], num_bits_per_symbol, dtype=dtype)
+        for n in num_units[1:]:  # Start from the second element
+            if layer_type == "linear":
+                self.layers.append(nn.Linear(in_features, n, dtype=dtype))
+            elif layer_type == "conv1d":
+                self.layers.append(
+                    nn.Conv1d(in_features, n, kernel_size=1, dtype=dtype)
+                )
+            elif layer_type == "conv2d":
+                self.layers.append(
+                    nn.Conv2d(in_features, n, kernel_size=1, dtype=dtype)
+                )
+            else:
+                raise NotImplementedError(
+                    f"Layer type '{layer_type}' is not supported. Use 'linear', 'conv1d', or 'conv2d'."
+                )
+
+            self.layers.append(nn.ReLU())
+            in_features = n
+
+        # Output layer
+        if layer_type == "linear":
+            self.output_layer = nn.Linear(
+                num_units[-1], num_bits_per_symbol, dtype=dtype
+            )
+        elif layer_type == "conv1d":
+            self.output_layer = nn.Conv1d(
+                num_units[-1], num_bits_per_symbol, kernel_size=1, dtype=dtype
+            )
+        elif layer_type == "conv2d":
+            self.output_layer = nn.Conv2d(
+                num_units[-1], num_bits_per_symbol, kernel_size=1, dtype=dtype
+            )
+
+        self.layer_type = layer_type
 
     def forward(self, s):
-        """
-        Forward pass of the ReadoutLLRs module.
-
-        Parameters
-        ----------
-        s : torch.Tensor
-            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s]
-            State vector
-
-        Returns
-        -------
-        torch.Tensor
-            [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_bits_per_symbol]
-            LLRs on the transmitted bits
-        """
         z = s
+        if self.layer_type == "conv1d":
+            z = z.transpose(1, 2)
+        elif self.layer_type == "conv2d":
+            z = z.permute(0, 4, 1, 2, 3)
+
         for layer in self.layers:
             z = layer(z)
+
         llr = self.output_layer(z)
+
+        if self.layer_type == "conv1d":
+            llr = llr.transpose(1, 2)
+        elif self.layer_type == "conv2d":
+            llr = llr.permute(0, 2, 3, 4, 1)
+
         return llr
 
 
