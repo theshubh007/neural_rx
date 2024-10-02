@@ -366,21 +366,28 @@ class E2E_Model(nn.Module):
             else:
                 x += x_torch * _mcs_ue_mask
         print("flag:10")
+
         # Convert TensorFlow tensor to PyTorch tensor
         active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
-        print("flag:10.1")
+
         # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
-        a_tx = a_tx.expand_as(x)
-        print("flag:10.2")
-        # Convert a_tx back to TensorFlow tensor if x is a TensorFlow tensor
+
+        # Check if x is a TensorFlow tensor or PyTorch tensor
         if isinstance(x, tf.Tensor):
+            # If x is a TensorFlow tensor, convert a_tx to TensorFlow tensor
             a_tx = tf.convert_to_tensor(a_tx.numpy())
-            x = tf.multiply(x, tf.cast(a_tx, tf.complex64))
-            print("flag:10.3")
+            # Use TensorFlow broadcasting instead of expand_as
+            a_tx = tf.broadcast_to(a_tx, tf.shape(x))
         else:
-            print("flag:10.4")
-            x = torch.mul(x, a_tx.to(torch.complex64))
+            # If x is a PyTorch tensor, use PyTorch's expand_as
+            a_tx = a_tx.expand_as(x)
+
+        # Perform the multiplication
+        if isinstance(x, tf.Tensor):
+            x = tf.multiply(x, tf.cast(a_tx, x.dtype))
+        else:
+            x = torch.mul(x, a_tx.to(x.dtype))
         print("flag:11")
         ###################################
         # Channel
