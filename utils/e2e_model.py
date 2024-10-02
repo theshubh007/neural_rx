@@ -365,7 +365,6 @@ class E2E_Model(nn.Module):
                 x = x_torch * _mcs_ue_mask
             else:
                 x += x_torch * _mcs_ue_mask
-        print("flag:10")
 
         # Convert TensorFlow tensor to PyTorch tensor
         active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
@@ -373,13 +372,17 @@ class E2E_Model(nn.Module):
         # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
 
+        print("flag:10")
         # Check if x is a TensorFlow tensor or PyTorch tensor
         if isinstance(x, tf.Tensor):
+            print("flag:10.1")
             # If x is a TensorFlow tensor, convert a_tx to TensorFlow tensor
             a_tx = tf.convert_to_tensor(a_tx.numpy())
             # Use TensorFlow broadcasting instead of expand_as
             a_tx = tf.broadcast_to(a_tx, tf.shape(x))
+            print("flag:10.2")
         else:
+            print("flag:10.3")
             # If x is a PyTorch tensor, use PyTorch's expand_as
             a_tx = a_tx.expand_as(x)
 
