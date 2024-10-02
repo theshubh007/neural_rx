@@ -286,15 +286,33 @@ class E2E_Model(nn.Module):
             assert isinstance(
                 mcs_arr_eval_idx, int
             ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
-            mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval_idx),
-                num_classes=len(self._sys_parameters.mcs_index),
+
+            # Convert mcs_arr_eval_idx to a TensorFlow tensor
+            mcs_arr_eval_idx_tf = tf.constant(mcs_arr_eval_idx)
+
+            # Create one-hot encoding
+            mcs_ue_mask = tf.one_hot(
+                mcs_arr_eval_idx_tf, depth=len(self._sys_parameters.mcs_index)
             )
-            mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-            mcs_ue_mask = mcs_ue_mask.repeat(
-                batch_size, self._sys_parameters.max_num_tx, 1
+            # Expand dimensions
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+
+            # Tile the tensor instead of using repeat
+            mcs_ue_mask = tf.tile(
+                mcs_ue_mask, [batch_size, self._sys_parameters.max_num_tx, 1]
             )
+
             mcs_arr_eval = [mcs_arr_eval_idx]
+            # mcs_ue_mask = torch.nn.functional.one_hot(
+            #     torch.tensor(mcs_arr_eval_idx),
+            #     num_classes=len(self._sys_parameters.mcs_index),
+            # )
+            # mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+            # mcs_ue_mask = mcs_ue_mask.repeat(
+            #     batch_size, self._sys_parameters.max_num_tx, 1
+            # )
+            # mcs_arr_eval = [mcs_arr_eval_idx]
             print("flag:3")
         else:
             print("flag:4")
