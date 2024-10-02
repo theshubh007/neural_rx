@@ -10,14 +10,17 @@
 
 # Implements baseline receiver algorithms for performance evaluation
 
-# from tensorflow.keras.layers import Layer
-# import tensorflow as tf
-import torch
-import torch.nn as nn
+from tensorflow.keras.layers import Layer
+import tensorflow as tf
 from itertools import combinations
 import numpy as np
 
-from sionna.ofdm import LMMSEInterpolator, KBestDetector, LinearDetector
+from sionna.ofdm import (
+    LMMSEInterpolator,
+    KBestDetector,
+    LinearDetector,
+    LSChannelEstimator,
+)
 from sionna.nr import (
     PUSCHReceiver,
     TBDecoder,
@@ -27,7 +30,7 @@ from sionna.nr import (
 from sionna.utils import flatten_last_dims, split_dim, flatten_dims
 
 
-class BaselineReceiver(nn.Module):
+class BaselineReceiver(Layer):
     """BaselineReceiver class implementing a Sionna baseline receiver for
     different receiver architectures.
 
@@ -70,7 +73,7 @@ class BaselineReceiver(nn.Module):
     def __init__(
         self,
         sys_parameters,
-        dtype=torch.complex64,
+        dtype=tf.complex64,
         return_tb_status=False,
         mcs_arr_eval_idx=0,
         **kwargs,
@@ -83,7 +86,6 @@ class BaselineReceiver(nn.Module):
         ###################################
         # Channel Estimation
         ###################################
-        print("Flag: BaselineReceiver")
         if sys_parameters.system in ("baseline_lmmse_kbest", "baseline_lmmse_lmmse"):
             # Setup channel estimator for non-perfect CSI
 
@@ -277,8 +279,7 @@ class BaselineReceiver(nn.Module):
             return_tb_crc_status=self._return_tb_status,
         )
 
-    def forward(self, inputs):
-        print("Flag: BaselineReceiver forward")
+    def call(self, inputs):
         if self._sys_parameters.system in (
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
@@ -295,7 +296,7 @@ class BaselineReceiver(nn.Module):
 # complexity of the LMMSEEstimator class feasible.
 
 
-class LowComplexityLMSEEstimator(nn.Module):
+class LowComplexityLMSEEstimator(LSChannelEstimator):
     """LowComplexityLMSEEstimator class for scalable LMMSE estimation for a
     large number of PRBs.
 
@@ -312,90 +313,82 @@ class LowComplexityLMSEEstimator(nn.Module):
     inputs : list
         [y, no]
 
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], torch.complex64
+    y : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], tf.complex64
         The received OFDM resource grid after cyclic prefix removal and FFT.
 
-    no : torch.float32
+    no : tf.float32
         Noise variance. Must have broadcastable shape to ``y``.
 
     Output
     ------
 
-    h_hat : [batch_size, 1, num_rx_ant, num_tx, 1, num_ofdm_symbols, fft_size], torch.complex64
+    h_hat : [batch_size, 1, num_rx_ant, num_tx, 1, num_ofdm_symbols, fft_size], tf.complex
         Channel estimates across the entire resource grid for all
         transmitters and streams
 
-    err_var : Same shape as ``h_hat``, torch.float32
+    err_var : Same shape as ``h_hat``, tf.float
         Channel estimation error variances across the entire resource grid
         for all transmitters and streams
     """
 
     def __init__(self, resource_grid, interpolator, sys_parameters, reduction=4):
-        super().__init__()
+        super().__init__(resource_grid, interpolator=interpolator, dtype=tf.complex64)
         self._reduction = reduction
         self._sys_parameters = sys_parameters
 
         # static shapes
         self._num_pilots = self._sys_parameters.transmitters[
             0
-        ]._resource_grid.num_pilot_symbols.item()
+        ]._resource_grid.num_pilot_symbols.numpy()
 
-        # Assuming these methods are implemented elsewhere or need to be implemented
-        self._removed_nulled_scs = lambda x: x  # Placeholder
-        self.estimate_at_pilot_locations = lambda x, y: (x, y)  # Placeholder
-        self._interpol = lambda x, y: (x, y)  # Placeholder
-
-    def forward(self, inputs):
-
+    def call(self, inputs):
         y, no = inputs
         y_eff = self._removed_nulled_scs(y)
         y_eff_flat = flatten_last_dims(y_eff)
-        y_pilots = torch.index_select(y_eff_flat, -1, self._pilot_ind)
+        y_pilots = tf.gather(y_eff_flat, self._pilot_ind, axis=-1)
         h_hat, err_var = self.estimate_at_pilot_locations(y_pilots, no)
-        err_var = err_var.expand_as(h_hat)
+        err_var = tf.broadcast_to(err_var, tf.shape(h_hat))
 
         # Hard-coded batch size
-        s = [
-            self._sys_parameters.batch_size_eval_small,
-            1,
-            self._sys_parameters.num_rx_antennas,
-            self._sys_parameters.max_num_tx,
-            1,
-            self._num_pilots,
-        ]
+        s = [self._sys_parameters.batch_size_eval_small]
+        s.append(1)  # num_rx
+        s.append(self._sys_parameters.num_rx_antennas)
+        s.append(self._sys_parameters.max_num_tx)
+        s.append(1)  # num_layer
+        s.append(self._num_pilots)
 
-        h_hat = h_hat.view(*s)
-        err_var = err_var.view(*s)
+        h_hat = tf.ensure_shape(h_hat, shape=s)
+        err_var = tf.ensure_shape(err_var, shape=s)
 
-        h_hat2 = split_dim(h_hat, [2, -1], dim=-1)
-        h_hat3 = split_dim(h_hat2, [self._reduction, -1], dim=-1)
-        h_hat4 = h_hat3.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        h_hat2 = split_dim(h_hat, [2, -1], axis=tf.rank(h_hat) - 1)
+        h_hat3 = split_dim(h_hat2, [self._reduction, -1], axis=tf.rank(h_hat2) - 1)
+        h_hat4 = tf.transpose(h_hat3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
         h_hat5 = flatten_last_dims(h_hat4, 2)
         h_hat6 = flatten_dims(h_hat5, 2, 0)
 
-        err_var2 = split_dim(err_var, [2, -1], dim=-1)
-        err_var3 = split_dim(err_var2, [self._reduction, -1], dim=-1)
-        err_var4 = err_var3.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        err_var2 = split_dim(err_var, [2, -1], axis=tf.rank(err_var) - 1)
+        err_var3 = split_dim(
+            err_var2, [self._reduction, -1], axis=tf.rank(err_var2) - 1
+        )
+        err_var4 = tf.transpose(err_var3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
         err_var5 = flatten_last_dims(err_var4, 2)
         err_var6 = flatten_dims(err_var5, 2, 0)
 
         h_hat7, err_var7 = self._interpol(h_hat6, err_var6)
-        err_var7 = torch.max(
-            err_var7, torch.tensor(0, dtype=err_var7.dtype, device=err_var7.device)
-        )
+        err_var7 = tf.maximum(err_var7, tf.cast(0, err_var7.dtype))
 
         h_hat8 = split_dim(h_hat7, [self._reduction, -1], 0)
-        h_hat9 = h_hat8.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        h_hat9 = tf.transpose(h_hat8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
         h_hat10 = flatten_last_dims(h_hat9, 2)
 
         err_var8 = split_dim(err_var7, [self._reduction, -1], 0)
-        err_var9 = err_var8.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        err_var9 = tf.transpose(err_var8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
         err_var10 = flatten_last_dims(err_var9, 2)
 
         return h_hat10, err_var10
 
 
-class LowComplexityPUSCHLMSEEstimator(nn.Module):
+class LowComplexityPUSCHLMSEEstimator(PUSCHLSChannelEstimator):
     """LowComplexityPUSCHLMSEEstimator class for scalable LMMSE estimation for 5G PUSCH.
 
     The LMMSE estimation is only applied to a smaller number of PRBs
@@ -407,27 +400,27 @@ class LowComplexityPUSCHLMSEEstimator(nn.Module):
     the num_rx parameter and the number of streams per tx.
 
     Remark: Similar to LowComplexityLMMSEEstimator, but supports
-    FOCC, i.e., non-orthogonal DMRS as done in some 5G NR configurations.
+    FOCC, i.e., non-orthogonal DMRS as done in  some 5G NR configurations.
 
     Input
     -----
     inputs : list
         [y, no]
 
-    y : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], torch.complex64
+    y : [batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant], tf.complex64
         The received OFDM resource grid after cyclic prefix removal and FFT.
 
-    no : torch.float32
+    no : tf.float32
         Noise variance. Must have broadcastable shape to ``y``.
 
     Output
     ------
 
-    h_hat : [batch_size, 1, num_rx_ant, num_tx, 1, num_ofdm_symbols, fft_size], torch.complex64
+    h_hat : [batch_size, 1, num_rx_ant, num_tx, 1, num_ofdm_symbols, fft_size], tf.complex
         Channel estimates across the entire resource grid for all
         transmitters and streams
 
-    err_var : Same shape as ``h_hat``, torch.float32
+    err_var : Same shape as ``h_hat``, tf.float
         Channel estimation error variances across the entire resource grid
         for all transmitters and streams
     """
@@ -442,64 +435,64 @@ class LowComplexityPUSCHLMSEEstimator(nn.Module):
         sys_parameters,
         reduction=4,
     ):
-        super().__init__()
+        super().__init__(
+            resource_grid=resource_grid,
+            dmrs_length=dmrs_length,
+            dmrs_additional_position=dmrs_additional_position,
+            num_cdm_groups_without_data=num_cdm_groups_without_data,
+            interpolator=interpolator,
+            dtype=tf.complex64,
+        )
         self._reduction = reduction
         self._sys_parameters = sys_parameters
 
         # static shapes
         self._num_pilots = self._sys_parameters.transmitters[
             0
-        ]._resource_grid.num_pilot_symbols.item()
+        ]._resource_grid.num_pilot_symbols.numpy()
 
-        # Assuming these methods are implemented elsewhere or need to be implemented
-        self._removed_nulled_scs = lambda x: x  # Placeholder
-        self.estimate_at_pilot_locations = lambda x, y: (x, y)  # Placeholder
-        self._interpol = lambda x, y: (x, y)  # Placeholder
-
-    def forward(self, inputs):
+    def call(self, inputs):
         y, no = inputs
         y_eff = self._removed_nulled_scs(y)
         y_eff_flat = flatten_last_dims(y_eff)
-        y_pilots = torch.index_select(y_eff_flat, -1, self._pilot_ind)
+        y_pilots = tf.gather(y_eff_flat, self._pilot_ind, axis=-1)
         h_hat, err_var = self.estimate_at_pilot_locations(y_pilots, no)
-        err_var = err_var.expand_as(h_hat)
+        err_var = tf.broadcast_to(err_var, tf.shape(h_hat))
 
         # Hard-coded batch size
-        s = [
-            self._sys_parameters.batch_size_eval_small,
-            1,
-            self._sys_parameters.num_rx_antennas,
-            self._sys_parameters.max_num_tx,
-            1,
-            self._num_pilots,
-        ]
+        s = [self._sys_parameters.batch_size_eval_small]
+        s.append(1)  # num_rx
+        s.append(self._sys_parameters.num_rx_antennas)
+        s.append(self._sys_parameters.max_num_tx)
+        s.append(1)  # num_layer
+        s.append(self._num_pilots)
 
-        h_hat = h_hat.view(*s)
-        err_var = err_var.view(*s)
+        h_hat = tf.ensure_shape(h_hat, shape=s)
+        err_var = tf.ensure_shape(err_var, shape=s)
 
-        h_hat2 = split_dim(h_hat, [2, -1], dim=-1)
-        h_hat3 = split_dim(h_hat2, [self._reduction, -1], dim=-1)
-        h_hat4 = h_hat3.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        h_hat2 = split_dim(h_hat, [2, -1], axis=tf.rank(h_hat) - 1)
+        h_hat3 = split_dim(h_hat2, [self._reduction, -1], axis=tf.rank(h_hat2) - 1)
+        h_hat4 = tf.transpose(h_hat3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
         h_hat5 = flatten_last_dims(h_hat4, 2)
         h_hat6 = flatten_dims(h_hat5, 2, 0)
 
-        err_var2 = split_dim(err_var, [2, -1], dim=-1)
-        err_var3 = split_dim(err_var2, [self._reduction, -1], dim=-1)
-        err_var4 = err_var3.permute(6, 0, 1, 2, 3, 4, 5, 7)
+        err_var2 = split_dim(err_var, [2, -1], axis=tf.rank(err_var) - 1)
+        err_var3 = split_dim(
+            err_var2, [self._reduction, -1], axis=tf.rank(err_var2) - 1
+        )
+        err_var4 = tf.transpose(err_var3, perm=[6, 0, 1, 2, 3, 4, 5, 7])
         err_var5 = flatten_last_dims(err_var4, 2)
         err_var6 = flatten_dims(err_var5, 2, 0)
 
         h_hat7, err_var7 = self._interpol(h_hat6, err_var6)
-        err_var7 = torch.max(
-            err_var7, torch.tensor(0, dtype=err_var7.dtype, device=err_var7.device)
-        )
+        err_var7 = tf.maximum(err_var7, tf.cast(0, err_var7.dtype))
 
         h_hat8 = split_dim(h_hat7, [self._reduction, -1], 0)
-        h_hat9 = h_hat8.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        h_hat9 = tf.transpose(h_hat8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
         h_hat10 = flatten_last_dims(h_hat9, 2)
 
         err_var8 = split_dim(err_var7, [self._reduction, -1], 0)
-        err_var9 = err_var8.permute(1, 2, 3, 4, 5, 6, 0, 7)
+        err_var9 = tf.transpose(err_var8, perm=[1, 2, 3, 4, 5, 6, 0, 7])
         err_var10 = flatten_last_dims(err_var9, 2)
 
         return h_hat10, err_var10

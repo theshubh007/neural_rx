@@ -14,6 +14,7 @@ import tensorflow as tf
 import numpy as np
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
+from tensorflow.nn import relu
 from sionna.utils import (
     flatten_dims,
     split_dim,
