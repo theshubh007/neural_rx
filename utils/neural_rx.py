@@ -127,52 +127,27 @@ class StateInit(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
-
-        # Get the input shapes dynamically
-        batch_size = y.shape[0]
-        num_tx = (
-            2  # Assuming fixed for now or dynamically infer from elsewhere if needed
-        )
-        num_subcarriers = y.shape[1]
-        num_ofdm_symbols = y.shape[2]
-
-        # Print shapes for debugging purposes (optional)
         print(
             f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
         )
 
-        # Dynamically compute the reshape size based on the total number of elements in pe
-        pe_num_elements = pe.numel()  # Total number of elements in pe tensor
-        expected_elements = batch_size * num_tx
+        batch_size = y.shape[0]
+        num_tx = pe.shape[0]
+        num_subcarriers = y.shape[1]
+        num_ofdm_symbols = y.shape[2]
+        num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
-        # Efficient handling of reshape when the size doesn't match perfectly
-        if pe_num_elements < expected_elements:
-            raise ValueError(
-                f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
-            )
-        elif pe_num_elements == expected_elements:
-            remaining_dim = (
-                1  # If exactly equal, just reshape without additional dimension
-            )
-        else:
-            remaining_dim = (
-                pe_num_elements // expected_elements
-            )  # Infer the remaining dimension size
+        # Reshape y
+        y = y.view(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
+        y = y.permute(0, 4, 1, 2, 3).contiguous()
+        y = y.view(batch_size, -1)
 
-        # Reshape pe based on dynamically calculated dimensions
-        pe = pe.view(batch_size, num_tx, remaining_dim)
+        # Reshape pe
+        pe = pe.view(num_tx, -1)
+        pe = pe.unsqueeze(0).expand(batch_size, -1, -1)
 
         if h_hat is not None:
-            # Dynamically reshape h_hat as well
-            h_hat_num_elements = h_hat.numel()
-            remaining_h_hat_dim = h_hat_num_elements // expected_elements
-
-            if h_hat_num_elements % expected_elements != 0:
-                raise ValueError(
-                    f"Cannot reshape h_hat of size {h_hat_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
-                )
-
-            h_hat = h_hat.view(batch_size, num_tx, remaining_h_hat_dim)
+            h_hat = h_hat.view(batch_size, num_tx, -1)
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
@@ -183,7 +158,7 @@ class StateInit(nn.Module):
             z = conv(z)
         z = self.output_conv(z)
 
-        # Reshape output back to the original format
+        # Reshape output
         z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
         return z  # Initial state of every user
@@ -1052,12 +1027,12 @@ class CGNNOFDM(nn.Module):
         pass
 
     def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
-        pe = torch.zeros(1, num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
         for tx in range(num_tx):
             for sc in range(num_subcarriers):
                 for sym in range(num_ofdm_symbols):
-                    pe[0, tx, sc, sym, 0] = sc / num_subcarriers
-                    pe[0, tx, sc, sym, 1] = sym / num_ofdm_symbols
+                    pe[tx, sc, sym, 0] = sc / num_subcarriers
+                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
         return pe
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
