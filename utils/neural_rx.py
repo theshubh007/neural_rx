@@ -1328,13 +1328,13 @@ class NeuralPUSCHReceiver(nn.Module):
 
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
-            if isinstance(mcs_arr_eval, tf.Tensor):
-                mcs_arr_eval = mcs_arr_eval.numpy().tolist()
+            if isinstance(mcs_arr_eval, torch.Tensor):
+                mcs_arr_eval = mcs_arr_eval.cpu().numpy().tolist()
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]
             bits = []
             for idx, mcs in enumerate(mcs_arr_eval):
-                bits.append(self._sys_parameters.transmitters[mcs]._tb_encoder(b[idx]))
+                bits.append(self._tb_encoders[mcs](b[idx]))
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
             if h is not None:
@@ -1347,18 +1347,42 @@ class NeuralPUSCHReceiver(nn.Module):
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
+
             # Ensure inputs are PyTorch tensors
             y = torch.as_tensor(y)
             active_tx = torch.as_tensor(active_tx)
+
             # Estimate channel using PyTorch tensors
             h_hat = self.estimate_channel(y, num_tx)
+
+            # Prepare positional encoding
+            batch_size = y.shape[0]
+            num_subcarriers = y.shape[1]
+            num_ofdm_symbols = y.shape[2]
+            pe = self._compute_positional_encoding(
+                num_tx, num_subcarriers, num_ofdm_symbols
+            )
+            pe = pe.to(y.device)
+
+            # Reshape y to match the expected input shape
+            y = y.permute(
+                0, 3, 1, 2
+            )  # [batch_size, 2*num_rx_ant, num_subcarriers, num_ofdm_symbols]
+            y = y.reshape(batch_size, -1, num_subcarriers, num_ofdm_symbols)
+
+            # Prepare inputs for _neural_rx
+            inputs = (y, pe, h_hat, active_tx)
+
             # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
-                (y, h_hat, active_tx),
+                inputs,
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
+
+            # Decode the LLRs
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
+
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
