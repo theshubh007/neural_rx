@@ -138,33 +138,29 @@ class StateInit(nn.Module):
         num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
         # Reshape y
-        y = y.reshape(
-            batch_size * num_tx, num_subcarriers * num_ofdm_symbols * num_rx_ant * 2
-        )
+        y = y.view(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
+        y = y.permute(0, 4, 1, 2, 3).contiguous()
+        y = y.view(batch_size, -1)
 
         # Reshape pe
-        pe = pe.permute(0, 2, 3, 1, 4).contiguous()
-        pe = pe.reshape(batch_size * num_tx, num_subcarriers * num_ofdm_symbols * 2)
+        pe = pe.view(batch_size, num_tx, -1)
 
         if h_hat is not None:
-            h_hat = h_hat.reshape(
-                batch_size * num_tx, num_subcarriers * num_ofdm_symbols * num_rx_ant * 2
-            )
-            z = torch.cat([y, pe, h_hat], dim=-1)
+            h_hat = h_hat.view(batch_size, num_tx, -1)
+            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
-            z = torch.cat([y, pe], dim=-1)
+            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
 
         # Apply the neural network
-        z = z.unsqueeze(-1).unsqueeze(-1)  # Add spatial dimensions for 2D convolution
+        z = z.view(batch_size * num_tx, -1, 1, 1)
         for conv in self.hidden_conv:
             z = conv(z)
         z = self.output_conv(z)
 
         # Reshape output
-        z = z.squeeze(-1).squeeze(-1)
-        s0 = z.reshape(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
+        z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
-        return s0  # Initial state of every user
+        return z  # Initial state of every user
 
 
 class AggregateUserStates(nn.Module):
@@ -1061,6 +1057,7 @@ class CGNNOFDM(nn.Module):
             else None
         )
         active_tx = torch.as_tensor(active_tx).to(self.dtype)
+
         print("flag 3")
         # Check if any of the tensors are scalars and handle accordingly
         if y.ndim == 0 or h_hat_init.ndim == 0 or active_tx.ndim == 0:
@@ -1099,15 +1096,15 @@ class CGNNOFDM(nn.Module):
 
         # Ensure mcs_ue_mask is properly initialized
         print("flag 3.4")
+        # Ensure mcs_ue_mask is properly initialized
         if mcs_ue_mask_eval is None:
             mcs_ue_mask = torch.nn.functional.one_hot(
                 torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
             ).to(y.device)
         else:
-            mcs_ue_mask = ensure_torch_tensor(mcs_ue_mask_eval).to(y.device)
-
+            mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-        print("flag 3.7")
+
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
         print("flag 3.71")
