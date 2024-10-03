@@ -301,7 +301,9 @@ class E2E_Model(nn.Module):
                 num_classes=len(self._sys_parameters.mcs_index),
             )
             mcs_ue_mask = mcs_ue_mask.unsqueeze(0).unsqueeze(0)
-            mcs_ue_mask = mcs_ue_mask.repeat(batch_size, self._sys_parameters.max_num_tx, 1)
+            mcs_ue_mask = mcs_ue_mask.repeat(
+                batch_size, self._sys_parameters.max_num_tx, 1
+            )
 
             mcs_arr_eval = [mcs_arr_eval_idx]
         else:
@@ -343,7 +345,7 @@ class E2E_Model(nn.Module):
         x = None
         for idx, mcs in enumerate(mcs_arr_eval):
             _mcs_ue_mask = mcs_ue_mask_torch[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
-
+            print("flag:9.1")
             # Assuming self._transmitters[mcs] is a Sionna component
             x_tf = self._transmitters[mcs](b[idx])
             x_torch = torch.from_numpy(x_tf.numpy())
@@ -352,6 +354,7 @@ class E2E_Model(nn.Module):
             _mcs_ue_mask = _mcs_ue_mask.unsqueeze(2).expand(
                 x_torch.shape[0], x_torch.shape[1], 1, 1, 1
             )
+            print("flag:9.2")
             _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
 
             if x is None:
@@ -359,9 +362,10 @@ class E2E_Model(nn.Module):
             else:
                 x += x_torch * _mcs_ue_mask
 
+        print("flag:9.3")
         # Convert TensorFlow tensor to PyTorch tensor
         active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
-
+        print("flag:9.4")
         # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
 
