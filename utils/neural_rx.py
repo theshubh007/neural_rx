@@ -137,8 +137,11 @@ class StateInit(nn.Module):
 
         if h_hat is not None:
             h_hat = h_hat.reshape(-1, *h_hat.shape[2:])
-            # Add an extra dimension to h_hat to match y and pe
-            h_hat = h_hat.unsqueeze(1)
+
+            # Ensure y, pe, and h_hat have the same number of dimensions
+            if y.dim() != h_hat.dim():
+                h_hat = h_hat.unsqueeze(-2)  # Add a dimension before the last dimension
+
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
             z = torch.cat([y, pe], dim=-1)
@@ -830,7 +833,7 @@ class CGNN(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat, active_tx, mcs_ue_mask = inputs
-        # Ensure all inputs are PyTorch tensors
+        # Ensure all inputs are PyTorch tensors with consistent shapes
         y = torch.as_tensor(y)
         pe = torch.as_tensor(pe)
         h_hat = torch.as_tensor(h_hat) if h_hat is not None else None
@@ -1090,8 +1093,8 @@ class CGNNOFDM(nn.Module):
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
         print("flag 3.7")
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
-        
-        print("flag 3.")
+
+        print("flag 3.71")
         indices = mcs_arr_eval
         llrs = []
         h_hats = []
