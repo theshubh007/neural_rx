@@ -1013,7 +1013,8 @@ class CGNNOFDM(nn.Module):
             ]
         else:
             print("flag 2")
-            y, h_hat_init, active_tx = [ensure_torch_tensor(x) for x in inputs]
+            # Unpack the inputs correctly
+            y, pe, h_hat_init, active_tx = [ensure_torch_tensor(x) for x in inputs]
 
         # Convert inputs to PyTorch tensors if they aren't already
         y = torch.as_tensor(y).to(self.dtype)
@@ -1023,6 +1024,7 @@ class CGNNOFDM(nn.Module):
             else None
         )
         active_tx = torch.as_tensor(active_tx).to(self.dtype)
+
         print("flag 3")
         # Check if any of the tensors are scalars and handle accordingly
         if y.ndim == 0 or h_hat_init.ndim == 0 or active_tx.ndim == 0:
@@ -1033,30 +1035,29 @@ class CGNNOFDM(nn.Module):
         num_tx = active_tx.shape[1]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
-        print("flag 3.1")
 
+        print("flag 3.1")
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
             y = torch.where(rg_type == 1, torch.tensor(0.0, dtype=y.dtype), y)
 
         print("flag 3.2")
-        y = y[:, 0]
         y = y.permute(0, 3, 2, 1)
-
         # Check if y is complex
-        if y.is_complex():
+        if torch.is_complex(y):
             y = torch.cat([y.real, y.imag], dim=-1)
         else:
             # If y is already real-valued, reshape it to match the expected shape
             y = y.reshape(*y.shape[:-1], -1, 2)
             y = y.reshape(*y.shape[:-2], -1)
 
-        # Compute positional encoding
+        # Compute positional encoding if not provided
         print("flag 3.3")
-        pe = self._compute_positional_encoding(
-            num_tx, num_subcarriers, num_ofdm_symbols
-        )
+        if "pe" not in locals():
+            pe = self._compute_positional_encoding(
+                num_tx, num_subcarriers, num_ofdm_symbols
+            )
         pe = pe.to(self.dtype).to(y.device)
         # Ensure mcs_ue_mask is properly initialized
         print("flag 3.4")
