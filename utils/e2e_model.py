@@ -346,15 +346,24 @@ class E2E_Model(nn.Module):
         for idx, mcs in enumerate(mcs_arr_eval):
             _mcs_ue_mask = mcs_ue_mask_torch[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
             print("flag:9.1")
-            # Assuming self._transmitters[mcs] is a Sionna component
-            x_tf = self._transmitters[mcs](b[idx])
+            _mcs_ue_mask = mcs_ue_mask[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
+
+            # Convert b[idx] to NumPy array if it's a PyTorch tensor
+            b_np = (
+                b[idx].detach().cpu().numpy()
+                if isinstance(b[idx], torch.Tensor)
+                else b[idx]
+            )
+            # Use the TensorFlow-based transmitter
+            x_tf = self._transmitters[mcs](b_np)
+
+            # Convert the result back to PyTorch tensor
             x_torch = torch.from_numpy(x_tf.numpy())
 
             # Adjust _mcs_ue_mask to match x_torch shape
             _mcs_ue_mask = _mcs_ue_mask.unsqueeze(2).expand(
                 x_torch.shape[0], x_torch.shape[1], 1, 1, 1
             )
-            print("flag:9.2")
             _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
 
             if x is None:
