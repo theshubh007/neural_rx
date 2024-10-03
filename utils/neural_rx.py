@@ -1033,11 +1033,18 @@ class CGNNOFDM(nn.Module):
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
             y = torch.where(rg_type == 1, torch.tensor(0.0, dtype=y.dtype), y)
-        
+
         print("flag 3.2")
         y = y[:, 0]
         y = y.permute(0, 3, 2, 1)
-        y = torch.cat([y.real, y.imag], dim=-1)
+
+        # Check if y is complex
+        if y.is_complex():
+            y = torch.cat([y.real, y.imag], dim=-1)
+        else:
+            # If y is already real-valued, reshape it to match the expected shape
+            y = y.reshape(*y.shape[:-1], -1, 2)
+            y = y.reshape(*y.shape[:-2], -1)
 
         # Compute positional encoding
         print("flag 3.3")
@@ -1057,7 +1064,7 @@ class CGNNOFDM(nn.Module):
             print("flag 3.6")
             mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-
+        print("flag 3.7")
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
         indices = mcs_arr_eval
