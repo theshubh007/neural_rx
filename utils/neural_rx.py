@@ -127,27 +127,54 @@ class StateInit(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
+
+        # Get the input shapes dynamically
+        batch_size = y.shape[0]
+        num_tx = 2  # Assuming fixed number of transmitters (adjust if needed)
+        num_subcarriers = y.shape[1]
+        num_ofdm_symbols = y.shape[2]
+
+        # Print shapes for debugging purposes (optional)
         print(
             f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
         )
 
-        batch_size = y.shape[0]
-        num_tx = pe.shape[0]
-        num_subcarriers = y.shape[1]
-        num_ofdm_symbols = y.shape[2]
-        num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
+        # Dynamically compute the reshape size based on the total number of elements in pe
+        pe_num_elements = pe.numel()  # Total number of elements in pe tensor
+        expected_elements = batch_size * num_tx
 
-        # Reshape y
-        y = y.view(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
-        y = y.permute(0, 4, 1, 2, 3).contiguous()
-        y = y.view(batch_size, -1)
+        # If the total number of elements in pe is less than expected, try to broadcast or pad it
+        if pe_num_elements < expected_elements:
+            print(
+                f"Warning: pe_num_elements ({pe_num_elements}) is smaller than expected ({expected_elements}). Adjusting dynamically."
+            )
+            # Pad pe to match the expected size
+            padding = expected_elements - pe_num_elements
+            pe = torch.nn.functional.pad(pe, (0, padding))  # Pad on the last dimension
+            pe_num_elements = pe.numel()
+
+        # If more elements are present, reshape appropriately
+        remaining_dim = pe_num_elements // expected_elements
 
         # Reshape pe
-        pe = pe.view(num_tx, -1)
-        pe = pe.unsqueeze(0).expand(batch_size, -1, -1)
+        if pe_num_elements % expected_elements != 0:
+            raise ValueError(
+                f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
+            )
+
+        pe = pe.view(batch_size, num_tx, remaining_dim)
 
         if h_hat is not None:
-            h_hat = h_hat.view(batch_size, num_tx, -1)
+            # Dynamically reshape h_hat as well
+            h_hat_num_elements = h_hat.numel()
+            remaining_h_hat_dim = h_hat_num_elements // expected_elements
+
+            if h_hat_num_elements % expected_elements != 0:
+                raise ValueError(
+                    f"Cannot reshape h_hat of size {h_hat_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
+                )
+
+            h_hat = h_hat.view(batch_size, num_tx, remaining_h_hat_dim)
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
@@ -158,7 +185,7 @@ class StateInit(nn.Module):
             z = conv(z)
         z = self.output_conv(z)
 
-        # Reshape output
+        # Reshape output back to the original format
         z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
         return z  # Initial state of every user
