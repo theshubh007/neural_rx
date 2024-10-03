@@ -122,9 +122,9 @@ class StateInit(nn.Module):
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1), pe], dim=2)
 
         # Apply the neural network
-        for conv in self._hidden_conv:
+        for conv in self.hidden_conv:
             z = conv(z)
-        z = self._output_conv(z)
+        z = self.output_conv(z)
 
         return z  # Initial state of every user
 
@@ -1325,6 +1325,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         print("Flag: Neural receiver -> Forward")
+
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
             if isinstance(mcs_arr_eval, tf.Tensor):
@@ -1334,40 +1335,29 @@ class NeuralPUSCHReceiver(nn.Module):
             bits = []
             for idx, mcs in enumerate(mcs_arr_eval):
                 bits.append(self._sys_parameters.transmitters[mcs]._tb_encoder(b[idx]))
-
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
-            print("Flag: 1")
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
-
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
-            print("Flag: 2")
             return losses
         else:
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
-
             # Ensure inputs are PyTorch tensors
             y = torch.as_tensor(y)
             active_tx = torch.as_tensor(active_tx)
-
-            print("Flag: 3.1")
             # Estimate channel using PyTorch tensors
             h_hat = self.estimate_channel(y, num_tx)
-
-            print("Flag: 3.3")
             # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
-
-            print("Flag: 4")
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
