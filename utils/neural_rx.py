@@ -1062,7 +1062,18 @@ class CGNNOFDM(nn.Module):
             ).to(y.device)
         else:
             print("flag 3.6")
-            mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
+            # Handle scalar tensor case
+            if (
+                isinstance(mcs_ue_mask_eval, (tf.Tensor, torch.Tensor))
+                and mcs_ue_mask_eval.ndim == 0
+            ):
+                mcs_ue_mask = torch.nn.functional.one_hot(
+                    torch.tensor(mcs_ue_mask_eval.item()),
+                    num_classes=self.num_mcss_supported,
+                ).to(y.device)
+            else:
+                mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
+
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
         print("flag 3.7")
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
