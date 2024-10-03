@@ -130,30 +130,39 @@ class StateInit(nn.Module):
         batch_size = y.shape[0]
         num_tx = pe.shape[1]
 
-        # Stack the inputs
-        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1, 1)
-        y = y.reshape(-1, *y.shape[2:])
-        pe = pe.reshape(-1, *pe.shape[2:])
+        # Ensure y has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_features]
+        if y.dim() == 4:
+            y = y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
+        elif y.dim() == 3:
+            y = y.unsqueeze(1).unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
 
+        # Ensure pe has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2]
+        if pe.dim() == 4:
+            pe = pe.unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
+        elif pe.dim() == 3:
+            pe = pe.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, -1, -1, 2)
+
+        # Handle h_hat
         if h_hat is not None:
-            h_hat = h_hat.reshape(-1, *h_hat.shape[2:])
-            
-            # Ensure all tensors have the same number of dimensions
-            while y.dim() > h_hat.dim():
-                h_hat = h_hat.unsqueeze(-1)
-            while pe.dim() > h_hat.dim():
-                h_hat = h_hat.unsqueeze(-1)
-            
-            # Ensure last dimension sizes match
-            if h_hat.shape[-1] < y.shape[-1] + pe.shape[-1]:
-                padding_size = y.shape[-1] + pe.shape[-1] - h_hat.shape[-1]
-                h_hat = torch.nn.functional.pad(h_hat, (0, padding_size))
-            elif h_hat.shape[-1] > y.shape[-1] + pe.shape[-1]:
-                h_hat = h_hat[..., :y.shape[-1] + pe.shape[-1]]
-            
+            # Ensure h_hat has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_features]
+            if h_hat.dim() == 4:
+                h_hat = h_hat.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
+            elif h_hat.dim() == 3:
+                h_hat = h_hat.unsqueeze(1).unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
+
+            # Adjust the last dimension of h_hat if necessary
+            if h_hat.shape[-1] > y.shape[-1] + pe.shape[-1]:
+                h_hat = h_hat[..., : y.shape[-1] + pe.shape[-1]]
+            elif h_hat.shape[-1] < y.shape[-1] + pe.shape[-1]:
+                pad_size = y.shape[-1] + pe.shape[-1] - h_hat.shape[-1]
+                h_hat = torch.nn.functional.pad(h_hat, (0, pad_size))
+
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
             z = torch.cat([y, pe], dim=-1)
+
+        # Flatten the first two dimensions
+        z = z.view(-1, *z.shape[2:])
 
         # Apply the neural network
         z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
@@ -163,9 +172,10 @@ class StateInit(nn.Module):
 
         # Unflatten
         z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
-        s0 = z.reshape(batch_size, num_tx, *z.shape[1:])
+        s0 = z.view(batch_size, num_tx, *z.shape[1:])
 
         return s0  # Initial state of every user
+
 
 class AggregateUserStates(nn.Module):
     """
@@ -879,7 +889,7 @@ class CGNN(nn.Module):
         for i in range(self.num_it):
             # State update
             s = self.iterations[i]([s, pe, active_tx])
-            
+
             # Read-outs
             if (self.training and self.apply_multiloss) or i == self.num_it - 1:
                 llrs_ = []
@@ -894,7 +904,6 @@ class CGNN(nn.Module):
                 h_hats.append(self.readout_chest(s))
 
         return llrs, h_hats
-
 
     @property
     def apply_multiloss(self):
@@ -1031,12 +1040,12 @@ class CGNNOFDM(nn.Module):
         pass
 
     def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
-        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        pe = torch.zeros(1, num_tx, num_subcarriers, num_ofdm_symbols, 2)
         for tx in range(num_tx):
             for sc in range(num_subcarriers):
                 for sym in range(num_ofdm_symbols):
-                    pe[tx, sc, sym, 0] = sc / num_subcarriers
-                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
+                    pe[0, tx, sc, sym, 0] = sc / num_subcarriers
+                    pe[0, tx, sc, sym, 1] = sym / num_ofdm_symbols
         return pe
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
@@ -1056,7 +1065,11 @@ class CGNNOFDM(nn.Module):
 
         # Convert inputs to PyTorch tensors if they aren't already
         y = torch.as_tensor(y).to(self.dtype)
-        h_hat_init = torch.as_tensor(h_hat_init).to(self.dtype) if h_hat_init is not None else None
+        h_hat_init = (
+            torch.as_tensor(h_hat_init).to(self.dtype)
+            if h_hat_init is not None
+            else None
+        )
         active_tx = torch.as_tensor(active_tx).to(self.dtype)
         print("flag 3")
         # Check if any of the tensors are scalars and handle accordingly
