@@ -1102,32 +1102,37 @@ class CGNNOFDM(nn.Module):
         indices = mcs_arr_eval
         llrs = []
         h_hats = []
-
+        print("flag 3.8")
         for llrs_, h_hat_ in zip(llrs_, h_hats_):
             h_hat_ = h_hat_.float()
             _llrs_ = []
-
+            print("flag 3.9")
             for idx in indices:
                 llrs_[idx] = llrs_[idx].float()
                 llrs_[idx] = llrs_[idx].permute(0, 1, 3, 2, 4).unsqueeze(1)
                 llrs_[idx] = self.rg_demapper(llrs_[idx])
                 llrs_[idx] = llrs_[idx][:, :num_tx]
                 llrs_[idx] = torch.flatten(llrs_[idx], start_dim=-2)
-
+                print("flag 3.10")
                 if self.layer_demappers is None:
+                    print("flag 3.11")
                     llrs_[idx] = llrs_[idx].squeeze(-2)
                 else:
+                    print("flag 3.12")
                     llrs_[idx] = self.layer_demappers[idx](llrs_[idx])
 
                 _llrs_.append(llrs_[idx])
-
+            print("flag 3.13")
             llrs.append(_llrs_)
             h_hats.append(h_hat_)
 
         if self.training:
+            print("flag 3.14")
             loss_data = torch.tensor(0.0, dtype=torch.float32)
+            print("flag 3.15")
             for llrs_ in llrs:
                 for idx, llr in enumerate(llrs_):
+                    print("flag 3.16")
                     loss_data_ = self.bce(llr, bits[idx])
                     mcs_ue_mask_ = expand_to_rank(
                         mcs_ue_mask[:, :, indices[idx] : indices[idx] + 1],
