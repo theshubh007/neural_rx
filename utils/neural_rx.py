@@ -105,8 +105,10 @@ class StateInit(nn.Module):
         # Reshape pe
         pe = pe.permute(0, 2, 3, 1).contiguous()
         pe = pe.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
+
         # Calculate the correct size for the middle dimension
         middle_dim = pe.size(2) * pe.size(3) // (num_subcarriers * num_ofdm_symbols)
+        middle_dim = max(1, middle_dim)  # Ensure middle_dim is at least 1
 
         # Reshape pe with the calculated middle dimension
         pe = pe.view(batch_size, num_tx, middle_dim, num_subcarriers, num_ofdm_symbols)
@@ -119,8 +121,11 @@ class StateInit(nn.Module):
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1), pe], dim=2)
 
-        # Reshape output
-        z = z.view(batch_size, num_tx, -1, num_subcarriers, num_ofdm_symbols)
+        # Apply the neural network
+        for conv in self._hidden_conv:
+            z = conv(z)
+        z = self._output_conv(z)
+
         return z  # Initial state of every user
 
 
