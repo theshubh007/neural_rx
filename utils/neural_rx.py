@@ -127,24 +127,44 @@ class StateInit(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
+
+        # Get the input shapes dynamically
+        batch_size = y.shape[0]
+        num_tx = pe.shape[1] if len(pe.shape) > 1 else 1
+        num_subcarriers = y.shape[1]
+        num_ofdm_symbols = y.shape[2]
+
+        # Print shapes for debugging purposes (optional)
         print(
             f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
         )
 
-        batch_size = y.shape[0]
-        num_tx = pe.shape[1]
-        num_subcarriers = y.shape[1]
-        num_ofdm_symbols = y.shape[2]
-        num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
+        # Dynamically compute the reshape size based on the total number of elements in pe
+        pe_num_elements = pe.numel()  # Total number of elements in pe tensor
+        expected_elements = batch_size * num_tx
+        remaining_dim = (
+            pe_num_elements // expected_elements
+        )  # Infer the remaining dimension size
 
-        # Print the size of pe tensor
-        print(f"Original size of pe: {pe.numel()}")
+        if pe_num_elements % expected_elements != 0:
+            raise ValueError(
+                f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
+            )
 
-        # Reshape pe correctly
-        pe = pe.view(batch_size, num_tx, -1)
+        # Reshape pe based on dynamically calculated dimensions
+        pe = pe.view(batch_size, num_tx, remaining_dim)
 
         if h_hat is not None:
-            h_hat = h_hat.view(batch_size, num_tx, -1)
+            # Dynamically reshape h_hat as well
+            h_hat_num_elements = h_hat.numel()
+            remaining_h_hat_dim = h_hat_num_elements // expected_elements
+
+            if h_hat_num_elements % expected_elements != 0:
+                raise ValueError(
+                    f"Cannot reshape h_hat of size {h_hat_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
+                )
+
+            h_hat = h_hat.view(batch_size, num_tx, remaining_h_hat_dim)
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
@@ -155,7 +175,7 @@ class StateInit(nn.Module):
             z = conv(z)
         z = self.output_conv(z)
 
-        # Reshape output
+        # Reshape output back to the original format
         z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
         return z  # Initial state of every user
