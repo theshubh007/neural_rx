@@ -447,16 +447,31 @@ class E2E_Model(nn.Module):
                 ch_type = "uma"
 
             print("flag:18")
-            # Topology update only required for 3GPP pilot patterns
-            topology = gen_single_sector_topology(
-                batch_size,
-                self._sys_parameters.max_num_tx,
-                ch_type,
-                min_ut_velocity=self._sys_parameters.min_ut_velocity,
-                max_ut_velocity=self._sys_parameters.max_ut_velocity,
-                indoor_probability=0.0,
-            )  # disable indoor users
-            self._sys_parameters.channel_model.set_topology(*topology)
+        # Topology update only required for 3GPP pilot patterns
+        max_num_tx = (
+            self._sys_parameters.max_num_tx.item()
+            if isinstance(self._sys_parameters.max_num_tx, torch.Tensor)
+            else self._sys_parameters.max_num_tx
+        )
+        min_ut_velocity = (
+            self._sys_parameters.min_ut_velocity.item()
+            if isinstance(self._sys_parameters.min_ut_velocity, torch.Tensor)
+            else self._sys_parameters.min_ut_velocity
+        )
+        max_ut_velocity = (
+            self._sys_parameters.max_ut_velocity.item()
+            if isinstance(self._sys_parameters.max_ut_velocity, torch.Tensor)
+            else self._sys_parameters.max_ut_velocity
+        )
+        topology = gen_single_sector_topology(
+            batch_size.item(),
+            max_num_tx,
+            ch_type,
+            min_ut_velocity=min_ut_velocity,
+            max_ut_velocity=max_ut_velocity,
+            indoor_probability=0.0,
+        )
+        self._sys_parameters.channel_model.set_topology(*topology)
 
         # Apply channel
         print("flag:19")
@@ -477,7 +492,7 @@ class E2E_Model(nn.Module):
             "baseline_lmmse_lmmse",
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
-        ):  
+        ):
             print("flag:23")
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
@@ -515,7 +530,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-            print("flag:28")         
+            print("flag:28")
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
