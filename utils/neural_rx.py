@@ -125,6 +125,7 @@ class StateInit(nn.Module):
         # Convert all layers to specified dtype
         self = self.to(dtype)
 
+
     def forward(self, inputs):
         y, pe, h_hat = inputs
         print(
