@@ -1063,15 +1063,36 @@ class CGNNOFDM(nn.Module):
         else:
             print("flag 3.6")
             # Handle scalar tensor case
-            if (
-                isinstance(mcs_ue_mask_eval, (tf.Tensor, torch.Tensor))
-                and mcs_ue_mask_eval.ndim == 0
-            ):
+            # Handle scalar tensor case
+            if isinstance(mcs_ue_mask_eval, (tf.Tensor, torch.Tensor)):
+                if tf.is_tensor(mcs_ue_mask_eval):
+                    # TensorFlow tensor
+                    if tf.rank(mcs_ue_mask_eval) == 0:
+                        mcs_ue_mask = torch.nn.functional.one_hot(
+                            torch.tensor(mcs_ue_mask_eval.numpy().item()),
+                            num_classes=self.num_mcss_supported,
+                        ).to(y.device)
+                    else:
+                        mcs_ue_mask = torch.from_numpy(mcs_ue_mask_eval.numpy()).to(
+                            y.device
+                        )
+                else:
+                    # PyTorch tensor
+                    if mcs_ue_mask_eval.dim() == 0:
+                        mcs_ue_mask = torch.nn.functional.one_hot(
+                            torch.tensor(mcs_ue_mask_eval.item()),
+                            num_classes=self.num_mcss_supported,
+                        ).to(y.device)
+                    else:
+                        mcs_ue_mask = mcs_ue_mask_eval.to(y.device)
+            elif isinstance(mcs_ue_mask_eval, (int, float)):
+                # Handle scalar Python types
                 mcs_ue_mask = torch.nn.functional.one_hot(
-                    torch.tensor(mcs_ue_mask_eval.item()),
+                    torch.tensor(mcs_ue_mask_eval),
                     num_classes=self.num_mcss_supported,
                 ).to(y.device)
             else:
+                # Assume it's a numpy array or other type that can be converted to a tensor
                 mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
 
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
