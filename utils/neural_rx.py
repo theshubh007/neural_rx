@@ -1293,30 +1293,44 @@ class NeuralPUSCHReceiver(nn.Module):
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
-            h_hat = self.estimate_channel(y, num_tx)
-            print("Flag: 3.1")
-            # Convert PyTorch tensors to TensorFlow tensors
-            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
+
+            # Convert PyTorch tensors to NumPy arrays
+            y_np = y.detach().cpu().numpy()
+            active_tx_np = active_tx.detach().cpu().numpy()
+
+            # Estimate channel using TensorFlow tensors
+            y_tf = tf.convert_to_tensor(y_np)
+            h_hat_tf = self.estimate_channel(y_tf, num_tx)
+
             print("Flag: 3.2")
-            h_hat_tf = (
-                tf.convert_to_tensor(h_hat.detach().cpu().numpy())
-                if h_hat is not None
-                else None
-            )
+
+            # Convert TensorFlow tensor back to NumPy array
+            h_hat_np = h_hat_tf.numpy() if h_hat_tf is not None else None
+
             print("Flag: 3.3")
-            active_tx_tf = tf.convert_to_tensor(active_tx.detach().cpu().numpy())
+
+            # Call _neural_rx with NumPy arrays
             llr, h_hat_refined = self._neural_rx(
-                (y_tf, h_hat_tf, active_tx_tf),
+                (y_np, h_hat_np, active_tx_np),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
-            print("Flag: 3.4")
-            # Convert TensorFlow tensors back to PyTorch tensors
-            llr = torch.from_numpy(llr.numpy()).to(y.device)
-            h_hat_refined = torch.from_numpy(h_hat_refined.numpy()).to(y.device)
+
             print("Flag: 4")
-            b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
-            return b_hat, h_hat_refined, h_hat, tb_crc_status
+
+            # Convert results back to PyTorch tensors
+            llr_torch = torch.from_numpy(llr)
+            h_hat_refined_torch = torch.from_numpy(h_hat_refined)
+
+            b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr_torch)
+
+            # Return all four variables
+            return (
+                b_hat,
+                h_hat_refined_torch,
+                torch.from_numpy(h_hat_np) if h_hat_np is not None else None,
+                tb_crc_status,
+            )
 
 
 ################################
