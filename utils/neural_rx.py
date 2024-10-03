@@ -89,9 +89,46 @@ class StateInit(nn.Module):
         Initial state tensor for each user.
     """
 
+    # def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
+    #     super().__init__()
+
+    #     if layer_type == "sepconv":
+
+    #         def conv_layer(in_channels, out_channels):
+    #             return nn.Sequential(
+    #                 nn.Conv2d(
+    #                     in_channels,
+    #                     in_channels,
+    #                     kernel_size=3,
+    #                     padding=1,
+    #                     groups=in_channels,
+    #                 ),
+    #                 nn.Conv2d(in_channels, out_channels, kernel_size=1),
+    #             )
+
+    #     elif layer_type == "conv":
+
+    #         def conv_layer(in_channels, out_channels):
+    #             return nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+
+    #     else:
+    #         raise NotImplementedError(f"Unknown layer_type '{layer_type}' selected.")
+
+    #     # Hidden blocks
+    #     self.hidden_conv = nn.ModuleList()
+    #     for n in num_units:
+    #         self.hidden_conv.append(nn.Sequential(conv_layer(n, n), nn.ReLU()))
+
+    #     # Output block
+    #     self.output_conv = conv_layer(num_units[-1], d_s)
+
+    #     # Convert all layers to specified dtype
+    #     self = self.to(dtype)
+
     def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
         super().__init__()
 
+        in_channels = 4 * 2 + 2  # num_rx_ant * 2 + 2 (for pe)
         if layer_type == "sepconv":
 
             def conv_layer(in_channels, out_channels):
@@ -117,10 +154,13 @@ class StateInit(nn.Module):
         # Hidden blocks
         self.hidden_conv = nn.ModuleList()
         for n in num_units:
-            self.hidden_conv.append(nn.Sequential(conv_layer(n, n), nn.ReLU()))
+            self.hidden_conv.append(
+                nn.Sequential(conv_layer(in_channels, n), nn.ReLU())
+            )
+            in_channels = n
 
         # Output block
-        self.output_conv = conv_layer(num_units[-1], d_s)
+        self.output_conv = conv_layer(in_channels, d_s)
 
         # Convert all layers to specified dtype
         self = self.to(dtype)
@@ -132,36 +172,39 @@ class StateInit(nn.Module):
         )
 
         batch_size = y.shape[0]
-        num_tx = pe.shape[0]
+        num_tx = pe.shape[1]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
         num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
         # Reshape y
-        y = y.reshape(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
-        y = y.permute(0, 4, 1, 2, 3).contiguous()
-        y = y.reshape(batch_size, -1)
+        y = y.reshape(batch_size, num_subcarriers * num_ofdm_symbols, num_rx_ant * 2)
+        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1)
 
         # Reshape pe
-        pe = pe.unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
-        pe = pe.reshape(batch_size, num_tx, -1)
+        pe = pe.permute(1, 2, 3, 0, 4).contiguous()
+        pe = pe.reshape(num_tx, num_subcarriers * num_ofdm_symbols, 2)
+        pe = pe.unsqueeze(0).repeat(batch_size, 1, 1, 1)
 
         if h_hat is not None:
-            h_hat = h_hat.reshape(batch_size, num_tx, -1)
-            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
+            h_hat = h_hat.reshape(
+                batch_size, num_tx, num_subcarriers * num_ofdm_symbols, num_rx_ant * 2
+            )
+            z = torch.cat([y, pe, h_hat], dim=-1)
         else:
-            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
+            z = torch.cat([y, pe], dim=-1)
 
         # Apply the neural network
-        z = z.view(batch_size * num_tx, -1, 1, 1)
+        z = z.permute(0, 1, 3, 2)  # [batch_size, num_tx, channels, height]
         for conv in self.hidden_conv:
             z = conv(z)
         z = self.output_conv(z)
 
         # Reshape output
-        z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
+        z = z.permute(0, 1, 3, 2)
+        s0 = z.reshape(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
-        return z  # Initial state of every user
+        return s0  # Initial state of every user
 
 
 class AggregateUserStates(nn.Module):
