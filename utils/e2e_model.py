@@ -461,10 +461,16 @@ class E2E_Model(nn.Module):
         # Apply channel
         print("flag:19")
 
-        # Convert PyTorch tensor to TensorFlow tensor
-        x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
-        no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
+        # Check if x and no are PyTorch tensors
+        if isinstance(x, torch.Tensor):
+            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
+        else:
+            x_tf = x  # Assume it's already a TensorFlow tensor
 
+        if isinstance(no, torch.Tensor):
+            no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
+        else:
+            no_tf = no  # Assume it's already a TensorFlow tensor
         if self._sys_parameters.channel_type == "AWGN":
             print("flag:20")
             y_tf = self._channel([x_tf, no_tf])
