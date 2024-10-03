@@ -132,7 +132,6 @@ class StateInit(nn.Module):
         )
 
         batch_size = y.shape[0]
-        num_tx = pe.shape[1]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
         num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
@@ -143,12 +142,14 @@ class StateInit(nn.Module):
         y = y.view(batch_size, -1)
 
         # Reshape pe
-        pe = pe.view(
-            batch_size, num_tx, num_subcarriers * num_ofdm_symbols * pe.shape[-1]
-        )
+        num_tx = pe.shape[1]
+        pe = pe.view(batch_size, num_tx, -1)
 
         if h_hat is not None:
             h_hat = h_hat.view(batch_size, num_tx, -1)
+
+        # Combine inputs
+        if h_hat is not None:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
@@ -1094,7 +1095,6 @@ class CGNNOFDM(nn.Module):
             num_tx, num_subcarriers, num_ofdm_symbols
         )
         pe = pe.to(self.dtype).to(y.device)
-
         # Ensure mcs_ue_mask is properly initialized
         print("flag 3.4")
         if mcs_ue_mask_eval is None:
@@ -1103,8 +1103,8 @@ class CGNNOFDM(nn.Module):
             ).to(y.device)
         else:
             mcs_ue_mask = ensure_torch_tensor(mcs_ue_mask_eval).to(y.device)
-
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+
         print("flag 3.7")
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
