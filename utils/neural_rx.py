@@ -143,7 +143,9 @@ class StateInit(nn.Module):
         y = y.view(batch_size, -1)
 
         # Reshape pe
-        pe = pe.view(batch_size, num_tx, -1)
+        pe = pe.view(
+            batch_size, num_tx, num_subcarriers * num_ofdm_symbols * pe.shape[-1]
+        )
 
         if h_hat is not None:
             h_hat = h_hat.view(batch_size, num_tx, -1)
