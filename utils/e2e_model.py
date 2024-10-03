@@ -296,25 +296,48 @@ class E2E_Model(nn.Module):
         )
         print("flag:1")
         if mcs_ue_mask is None:
+            print("flag:2")
             assert isinstance(
                 mcs_arr_eval_idx, int
             ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
-            mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval_idx),
-                num_classes=len(self._sys_parameters.mcs_index),
+
+            # Convert mcs_arr_eval_idx to a TensorFlow tensor
+            mcs_arr_eval_idx_tf = tf.constant(mcs_arr_eval_idx)
+
+            # Create one-hot encoding
+            mcs_ue_mask = tf.one_hot(
+                mcs_arr_eval_idx_tf, depth=len(self._sys_parameters.mcs_index)
             )
-            mcs_ue_mask = mcs_ue_mask.unsqueeze(0).unsqueeze(0)
-            mcs_ue_mask = mcs_ue_mask.repeat(
-                batch_size, self._sys_parameters.max_num_tx, 1
+            # Expand dimensions
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+
+            # Tile the tensor instead of using repeat
+            mcs_ue_mask = tf.tile(
+                mcs_ue_mask, [batch_size, self._sys_parameters.max_num_tx, 1]
             )
+
             mcs_arr_eval = [mcs_arr_eval_idx]
+            # mcs_ue_mask = torch.nn.functional.one_hot(
+            #     torch.tensor(mcs_arr_eval_idx),
+            #     num_classes=len(self._sys_parameters.mcs_index),
+            # )
+            # mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+            # mcs_ue_mask = mcs_ue_mask.repeat(
+            #     batch_size, self._sys_parameters.max_num_tx, 1
+            # )
+            # mcs_arr_eval = [mcs_arr_eval_idx]
+            print("flag:3")
         else:
+            print("flag:4")
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
                 assert len(mcs_arr_eval_idx) == len(
                     self._sys_parameters.mcs_index
                 ), "mcs_arr_eval_idx list not compatible with length of mcs_index array"
                 mcs_arr_eval = mcs_arr_eval_idx
+                print("flag:5")
             else:
+                print("flag:6")
                 mcs_arr_eval = list(range(len(self._sys_parameters.mcs_index)))
 
         # Transmitters
@@ -323,33 +346,45 @@ class E2E_Model(nn.Module):
         for idx in range(len(mcs_arr_eval)):
             b.append(
                 self._source(
-                    (
+                    [
                         batch_size,
                         self._sys_parameters.max_num_tx,
                         self._transmitters[mcs_arr_eval[idx]]._tb_size,
-                    )
+                    ]
                 )
             )
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
 
+        # Convert TensorFlow tensors to PyTorch tensors
+        mcs_ue_mask_torch = torch.from_numpy(mcs_ue_mask.numpy())
+        active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
+        print("flag:9")
         x = None
         for idx, mcs in enumerate(mcs_arr_eval):
-            _mcs_ue_mask = mcs_ue_mask[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
+            _mcs_ue_mask = mcs_ue_mask_torch[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
+
+            # Assuming self._transmitters[mcs] is a Sionna component
             x_tf = self._transmitters[mcs](b[idx])
             x_torch = torch.from_numpy(x_tf.numpy())
+
+            # Adjust _mcs_ue_mask to match x_torch shape
             _mcs_ue_mask = _mcs_ue_mask.unsqueeze(2).expand(
                 x_torch.shape[0], x_torch.shape[1], 1, 1, 1
             )
             _mcs_ue_mask = _mcs_ue_mask.expand_as(x_torch)
+
             if x is None:
                 x = x_torch * _mcs_ue_mask
             else:
                 x += x_torch * _mcs_ue_mask
 
-        a_tx = expand_to_rank(active_dmrs, x.dim(), axis=-1)
-        x = torch.mul(x, a_tx)
+        # Convert TensorFlow tensor to PyTorch tensor
+        active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
+
+        # Ensure a_tx has the same shape as x
+        a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
 
         print("flag:10")
 
@@ -450,17 +485,15 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
-        print("flag:22")
+
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
         ):
-
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
-                print("flag:23")
                 b_hat, tb_crc_status = b_hat
             else:
                 tb_crc_status = None
@@ -468,7 +501,6 @@ class E2E_Model(nn.Module):
             # return b[0] and b_hat only for active DMRS ports
             # b only holds bits corresponding to MCS indices specified
             # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
-            print("flag:24")
             return self._mask_active_dmrs(
                 b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
             )
@@ -493,7 +525,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-            print("flag:25")
+
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
@@ -547,7 +579,7 @@ class E2E_Model(nn.Module):
                     if output_nrx_h_hat:
                         return b, b_hat, h, h_hat_refined, h_hat
                     else:
-                        return b[0], b_hat
+                        return b, b_hat
         else:
             raise ValueError("Unknown system selected!")
 
