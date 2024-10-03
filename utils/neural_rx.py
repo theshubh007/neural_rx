@@ -116,7 +116,6 @@ class StateInit(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
-
         batch_size = y.shape[0]
         num_tx = pe.shape[1]
 
@@ -127,6 +126,8 @@ class StateInit(nn.Module):
 
         if h_hat is not None:
             h_hat = h_hat.reshape(-1, *h_hat.shape[2:])
+            # Add an extra dimension to h_hat to match y and pe
+            h_hat = h_hat.unsqueeze(1)
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
             z = torch.cat([y, pe], dim=-1)
