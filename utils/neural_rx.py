@@ -1366,15 +1366,17 @@ class NeuralPUSCHReceiver(nn.Module):
             h_hat = self.estimate_channel(y, num_tx)
 
             # Prepare positional encoding
-            batch_size = y.shape[0]
-            num_subcarriers = y.shape[1]
-            num_ofdm_symbols = y.shape[2]
+            batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
             pe = self._compute_positional_encoding(
                 num_tx, num_subcarriers, num_ofdm_symbols
             )
             pe = pe.to(y.device)
 
             # Reshape y to match the expected input shape
+            if (
+                y.dim() == 5
+            ):  # If y already has the shape [batch_size, 1, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
+                y = y.squeeze(1)
             y = y.permute(
                 0, 3, 1, 2
             )  # [batch_size, 2*num_rx_ant, num_subcarriers, num_ofdm_symbols]
