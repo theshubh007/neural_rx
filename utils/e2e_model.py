@@ -459,26 +459,32 @@ class E2E_Model(nn.Module):
             self._sys_parameters.channel_model.set_topology(*topology)
 
         # Apply channel
+        print("flag:19")
         if self._sys_parameters.channel_type == "AWGN":
+            print("flag:20")
             y = self._channel([x, no])
             h = torch.ones_like(y)  # simple AWGN channel
         else:
+            print("flag:21")
             y, h = self._channel([x, no])
 
         ###################################
         # Receiver
         ###################################
-
+        print("flag:22")
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
-        ):
+        ):  
+            print("flag:23")
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
+                print("flag:24")
                 b_hat, tb_crc_status = b_hat
             else:
+                print("flag:25")
                 tb_crc_status = None
 
             # return b[0] and b_hat only for active DMRS ports
@@ -492,11 +498,12 @@ class E2E_Model(nn.Module):
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
         ):
-
+            print("flag:26")
             # perfect CSI receiver needs ground truth channel
             b_hat = self._receiver([y, h, no])
 
             if self._return_tb_status:
+                print("flag:27")
                 b_hat, tb_crc_status = b_hat
             else:
                 tb_crc_status = None
@@ -508,7 +515,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-
+            print("flag:28")         
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
@@ -521,6 +528,7 @@ class E2E_Model(nn.Module):
                 # - refined channel estimate h_hat_refined
                 # - initial channel estimate h_hat
                 # - [optional] transport block CRC status
+                print("flag:29")
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
                     (y, active_dmrs), mcs_arr_eval, mcs_ue_mask_eval=mcs_ue_mask
                 )
@@ -531,6 +539,7 @@ class E2E_Model(nn.Module):
                 # Data
                 # b only holds bits corresponding to MCS indices specified
                 # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
+                print("flag:30")
                 b, b_hat, tb_crc_status = self._mask_active_dmrs(
                     b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
                 )
