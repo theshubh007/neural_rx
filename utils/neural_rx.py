@@ -996,22 +996,29 @@ class CGNNOFDM(nn.Module):
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
             y, h_hat_init, active_tx = inputs
-            if mcs_ue_mask_eval is None:
-                mcs_ue_mask = torch.nn.functional.one_hot(
-                    torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
-                )
-            else:
-                mcs_ue_mask = mcs_ue_mask_eval
-            mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
-        # Convert NumPy arrays to PyTorch tensors
-
-        y = torch.from_numpy(y).to(self.dtype)
+            # if mcs_ue_mask_eval is None:
+            #     mcs_ue_mask = torch.nn.functional.one_hot(
+            #         torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
+            #     )
+            # else:
+            #     mcs_ue_mask = mcs_ue_mask_eval
+            # mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+        # Convert inputs to PyTorch tensors if they aren't already
+        y = torch.as_tensor(y).to(self.dtype)
         h_hat_init = (
-            torch.from_numpy(h_hat_init).to(self.dtype)
+            torch.as_tensor(h_hat_init).to(self.dtype)
             if h_hat_init is not None
             else None
         )
-        active_tx = torch.from_numpy(active_tx).to(self.dtype)
+        active_tx = torch.as_tensor(active_tx).to(self.dtype)
+
+        if mcs_ue_mask_eval is None:
+            mcs_ue_mask = torch.nn.functional.one_hot(
+                torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
+            )
+        else:
+            mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval)
+        mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
         num_tx = active_tx.shape[1]
         num_subcarriers = y.shape[1]
@@ -1256,24 +1263,23 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        if isinstance(y, np.ndarray):
-            y = torch.from_numpy(y)
+        if isinstance(y, torch.Tensor):
+            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
+        else:
+            y_tf = y
 
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-
-            # Convert PyTorch tensor to TensorFlow tensor
-            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
             h_hat, _ = self._ls_est([y_tf, tf.constant(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
             h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
             h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
 
             # Convert TensorFlow tensor back to PyTorch tensor
-            h_hat = torch.from_numpy(h_hat.numpy()).to(y.device)
+            h_hat = torch.from_numpy(h_hat.numpy())
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
 
@@ -1315,6 +1321,11 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
 
+            # Ensure inputs are PyTorch tensors
+            y = torch.as_tensor(y)
+            active_tx = torch.as_tensor(active_tx)
+
+            print("Flag: 3.1")
             # Estimate channel using PyTorch tensors
             h_hat = self.estimate_channel(y, num_tx)
 
@@ -1327,17 +1338,8 @@ class NeuralPUSCHReceiver(nn.Module):
             )
 
             print("Flag: 4")
-            # Convert results back to PyTorch tensors if they aren't already
-            llr_torch = torch.from_numpy(llr) if isinstance(llr, np.ndarray) else llr
-            h_hat_refined_torch = (
-                torch.from_numpy(h_hat_refined)
-                if isinstance(h_hat_refined, np.ndarray)
-                else h_hat_refined
-            )
-
-            b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr_torch)
-
-            return b_hat, h_hat_refined_torch, h_hat, tb_crc_status
+            b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
+            return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
 ################################
