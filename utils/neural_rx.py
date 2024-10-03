@@ -127,52 +127,40 @@ class StateInit(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
-        batch_size = y.shape[0]
+        print(
+            f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
+        )
+
+        batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
         num_tx = pe.shape[1]
 
-        # Ensure y has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_features]
-        if y.dim() == 4:
-            y = y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
-        elif y.dim() == 3:
-            y = y.unsqueeze(1).unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
+        # Reshape and expand pe to match y's batch size
+        pe = pe.squeeze(0).unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
 
-        # Ensure pe has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2]
-        if pe.dim() == 4:
-            pe = pe.unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
-        elif pe.dim() == 3:
-            pe = pe.unsqueeze(0).unsqueeze(-1).expand(batch_size, -1, -1, -1, 2)
+        # Reshape y to include num_tx dimension
+        y = y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
 
-        # Handle h_hat
+        # Reshape inputs to 2D for processing
+        y = y.reshape(-1, num_subcarriers * num_ofdm_symbols * num_rx_ant)
+        pe = pe.reshape(-1, num_subcarriers * num_ofdm_symbols * 2)
+
         if h_hat is not None:
-            # Ensure h_hat has 5 dimensions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, num_features]
-            if h_hat.dim() == 4:
-                h_hat = h_hat.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
-            elif h_hat.dim() == 3:
-                h_hat = h_hat.unsqueeze(1).unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
-
-            # Adjust the last dimension of h_hat if necessary
-            if h_hat.shape[-1] > y.shape[-1] + pe.shape[-1]:
-                h_hat = h_hat[..., : y.shape[-1] + pe.shape[-1]]
-            elif h_hat.shape[-1] < y.shape[-1] + pe.shape[-1]:
-                pad_size = y.shape[-1] + pe.shape[-1] - h_hat.shape[-1]
-                h_hat = torch.nn.functional.pad(h_hat, (0, pad_size))
-
+            h_hat = h_hat.reshape(
+                -1, num_subcarriers * num_ofdm_symbols * h_hat.shape[-1]
+            )
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
             z = torch.cat([y, pe], dim=-1)
 
-        # Flatten the first two dimensions
-        z = z.view(-1, *z.shape[2:])
-
         # Apply the neural network
-        z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
+        z = z.unsqueeze(-1).unsqueeze(-1)  # Add spatial dimensions for 2D convolution
         for conv in self.hidden_conv:
             z = conv(z)
         z = self.output_conv(z)
 
-        # Unflatten
-        z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
-        s0 = z.view(batch_size, num_tx, *z.shape[1:])
+        # Reshape output
+        z = z.squeeze(-1).squeeze(-1)
+        s0 = z.reshape(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
         return s0  # Initial state of every user
 
