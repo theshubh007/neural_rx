@@ -105,7 +105,11 @@ class StateInit(nn.Module):
         # Reshape pe
         pe = pe.permute(0, 2, 3, 1).contiguous()
         pe = pe.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
-        pe = pe.view(batch_size, num_tx, -1, num_subcarriers, num_ofdm_symbols)
+        # Calculate the correct size for the middle dimension
+        middle_dim = pe.size(2) * pe.size(3) // (num_subcarriers * num_ofdm_symbols)
+
+        # Reshape pe with the calculated middle dimension
+        pe = pe.view(batch_size, num_tx, middle_dim, num_subcarriers, num_ofdm_symbols)
 
         if h_hat is not None:
             h_hat = h_hat.permute(0, 1, 4, 2, 3).contiguous()
@@ -114,12 +118,6 @@ class StateInit(nn.Module):
             )
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1), pe], dim=2)
-
-        # Apply the neural network
-        z = z.view(batch_size * num_tx, -1, num_subcarriers, num_ofdm_symbols)
-        for conv in self.hidden_conv:
-            z = conv(z)
-        z = self.output_conv(z)
 
         # Reshape output
         z = z.view(batch_size, num_tx, -1, num_subcarriers, num_ofdm_symbols)
