@@ -8,7 +8,6 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
-
 ##### Neural Receiver #####
 import torch
 import torch.nn as nn
@@ -17,7 +16,7 @@ from tensorflow.keras import Model
 from sionna.utils import (
     flatten_dims,
     split_dim,
-    # expand_to_rank,
+    expand_to_rank,
 )
 import numpy as np
 from sionna.ofdm import ResourceGridDemapper
@@ -25,37 +24,45 @@ from sionna.nr import TBDecoder, PUSCHLSChannelEstimator
 from sionna.nr import LayerDemapper as SionnaLayerDemapper
 
 
-def ensure_torch_tensor(tensor):
-    if isinstance(tensor, tf.Tensor):
-        return torch.from_numpy(tensor.numpy())
-    elif isinstance(tensor, np.ndarray):
-        return torch.from_numpy(tensor)
-    elif isinstance(tensor, torch.Tensor):
-        return tensor
-    else:
-        return torch.tensor(tensor)
-
-
-def expand_to_rank(tensor, rank, axis=0):
-    if isinstance(tensor, (int, float)):
-        tensor = torch.tensor([tensor])
-    elif isinstance(tensor, tf.Tensor) and tensor.shape == ():
-        tensor = torch.tensor([tensor.numpy().item()])
-    elif isinstance(tensor, torch.Tensor) and tensor.dim() == 0:
-        tensor = tensor.unsqueeze(0)
-
-    while len(tensor.shape) < rank:
-        if axis == -1:
-            tensor = tensor.unsqueeze(-1)
-        else:
-            tensor = tensor.unsqueeze(0)
-    return tensor
-
-
 class StateInit(nn.Module):
+    """
+    Network initializing the state tensor for each user.
+
+    The network consists of len(num_units) hidden blocks, each block
+    consisting of:
+    - A Separable conv layer (including a pointwise convolution)
+    - A ReLU activation
+    The last block is the output block and has the same architecture, but
+    with `d_s` units and no non-linearity
+
+    Parameters
+    ----------
+    d_s : int
+        Size of the state vector
+    num_units : list of int
+        Number of kernels for the hidden layers of the MLP.
+    layer_type: str
+        Defines which Convolutional layers are used. Can be "sepconv" or "conv".
+
+    Input
+    -----
+    y : [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant], torch.Tensor
+        The received OFDM resource grid after cyclic prefix removal and FFT.
+    pe : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2], torch.Tensor
+        Map showing the position of the nearest pilot for every user in time
+        and frequency. This can be seen as a form of positional encoding.
+    h_hat : None or [batch_size, num_tx, num_subcarriers, num_ofdm_symbols,
+             2*num_rx_ant], torch.Tensor
+        Initial channel estimate. If `None`, `h_hat` will be ignored.
+
+    Output
+    ------
+    : [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, d_s], torch.Tensor
+        Initial state tensor for each user.
+    """
+
     def __init__(self, d_s, num_units, layer_type="sepconv", dtype=torch.float32):
         super().__init__()
-        in_channels = 4 * 2 + 2  # num_rx_ant * 2 + 2 (for pe)
 
         if layer_type == "sepconv":
 
@@ -82,51 +89,42 @@ class StateInit(nn.Module):
         # Hidden blocks
         self.hidden_conv = nn.ModuleList()
         for n in num_units:
-            self.hidden_conv.append(
-                nn.Sequential(conv_layer(in_channels, n), nn.ReLU())
-            )
-            in_channels = n
+            self.hidden_conv.append(nn.Sequential(conv_layer(n, n), nn.ReLU()))
 
         # Output block
-        self.output_conv = conv_layer(in_channels, d_s)
+        self.output_conv = conv_layer(num_units[-1], d_s)
 
         # Convert all layers to specified dtype
         self = self.to(dtype)
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
-        batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
-        num_tx = pe.shape[0]
 
-        # Reshape y
-        y = y.permute(0, 3, 1, 2).contiguous()
-        y = y.view(batch_size, -1, num_subcarriers, num_ofdm_symbols)
+        batch_size = y.shape[0]
+        num_tx = pe.shape[1]
 
-        # Reshape pe
-        pe = pe.permute(0, 2, 3, 1).contiguous()
-        pe = pe.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
-
-        # Calculate the correct size for the middle dimension
-        middle_dim = pe.size(2) * pe.size(3) // (num_subcarriers * num_ofdm_symbols)
-        middle_dim = max(1, middle_dim)  # Ensure middle_dim is at least 1
-
-        # Reshape pe with the calculated middle dimension
-        pe = pe.view(batch_size, num_tx, middle_dim, num_subcarriers, num_ofdm_symbols)
+        # Stack the inputs
+        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1, 1)
+        y = y.reshape(-1, *y.shape[2:])
+        pe = pe.reshape(-1, *pe.shape[2:])
 
         if h_hat is not None:
-            h_hat = h_hat.permute(0, 1, 4, 2, 3).contiguous()
-            z = torch.cat(
-                [y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1), pe, h_hat], dim=2
-            )
+            h_hat = h_hat.reshape(-1, *h_hat.shape[2:])
+            z = torch.cat([y, pe, h_hat], dim=-1)
         else:
-            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1), pe], dim=2)
+            z = torch.cat([y, pe], dim=-1)
 
         # Apply the neural network
+        z = z.permute(0, 3, 1, 2)  # [batch_size*num_tx, channels, height, width]
         for conv in self.hidden_conv:
             z = conv(z)
         z = self.output_conv(z)
 
-        return z  # Initial state of every user
+        # Unflatten
+        z = z.permute(0, 2, 3, 1)  # [batch_size*num_tx, height, width, channels]
+        s0 = z.reshape(batch_size, num_tx, *z.shape[1:])
+
+        return s0  # Initial state of every user
 
 
 class AggregateUserStates(nn.Module):
@@ -803,19 +801,6 @@ class CGNN(nn.Module):
 
     def forward(self, inputs):
         y, pe, h_hat, active_tx, mcs_ue_mask = inputs
-        # Ensure all inputs are PyTorch tensors with consistent shapes
-        y = torch.as_tensor(y)
-        pe = torch.as_tensor(pe)
-        h_hat = torch.as_tensor(h_hat) if h_hat is not None else None
-        active_tx = torch.as_tensor(active_tx)
-        mcs_ue_mask = torch.as_tensor(mcs_ue_mask)
-        # Print input shapes for debugging
-        print(
-            f"CGNN input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
-        )
-        print(
-            f"active_tx shape: {active_tx.shape}, mcs_ue_mask shape: {mcs_ue_mask.shape}"
-        )
 
         # Normalization
         norm_scaling = torch.mean(torch.square(y), dim=(1, 2, 3), keepdim=True)
@@ -942,7 +927,7 @@ class CGNNOFDM(nn.Module):
         self.dtype = dtype
         self.num_mcss_supported = len(sys_parameters.mcs_index)
         self.rg = sys_parameters.transmitters[0]._resource_grid
-        print("flag CGNNOFDM initialized")
+
         if self.sys_parameters.mask_pilots:
             print("Masking pilots for pilotless communications.")
 
@@ -991,122 +976,69 @@ class CGNNOFDM(nn.Module):
         # The result should be a tensor of shape [max_num_tx, num_subcarriers, num_ofdm_symbols, 2]
         pass
 
-    def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
-        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
-        for tx in range(num_tx):
-            for sc in range(num_subcarriers):
-                for sym in range(num_ofdm_symbols):
-                    pe[tx, sc, sym, 0] = sc / num_subcarriers
-                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
-        return pe
-
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
-        print("flag CGNNOFDM forward")
-        print(f"Input types: {[type(inp) for inp in inputs]}")
-        print(
-            f"Input shapes: {[inp.shape if hasattr(inp, 'shape') else 'scalar' for inp in inputs]}"
-        )
         if self.training:
-            print("flag 1")
-            y, h_hat_init, active_tx, bits, h, mcs_ue_mask = [
-                ensure_torch_tensor(x) for x in inputs
-            ]
+            y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
-            print("flag 2")
-            # Unpack the inputs correctly
-            y, pe, h_hat_init, active_tx = [ensure_torch_tensor(x) for x in inputs]
-
-        # Convert inputs to PyTorch tensors if they aren't already
-        y = torch.as_tensor(y).to(self.dtype)
-        h_hat_init = (
-            torch.as_tensor(h_hat_init).to(self.dtype)
-            if h_hat_init is not None
-            else None
-        )
-        active_tx = torch.as_tensor(active_tx).to(self.dtype)
-
-        print("flag 3")
-        # Check if any of the tensors are scalars and handle accordingly
-        if y.ndim == 0 or h_hat_init.ndim == 0 or active_tx.ndim == 0:
-            raise ValueError(
-                "One or more input tensors are scalars. Expected multi-dimensional tensors."
-            )
+            y, h_hat_init, active_tx = inputs
+            if mcs_ue_mask_eval is None:
+                mcs_ue_mask = torch.nn.functional.one_hot(
+                    torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
+                )
+            else:
+                mcs_ue_mask = mcs_ue_mask_eval
+            mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
         num_tx = active_tx.shape[1]
-        num_subcarriers = y.shape[1]
-        num_ofdm_symbols = y.shape[2]
 
-        print("flag 3.1")
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
             y = torch.where(rg_type == 1, torch.tensor(0.0, dtype=y.dtype), y)
 
-        print("flag 3.2")
+        y = y[:, 0]
         y = y.permute(0, 3, 2, 1)
-        # Check if y is complex
-        if torch.is_complex(y):
-            y = torch.cat([y.real, y.imag], dim=-1)
-        else:
-            # If y is already real-valued, reshape it to match the expected shape
-            y = y.reshape(*y.shape[:-1], -1, 2)
-            y = y.reshape(*y.shape[:-2], -1)
+        y = torch.cat([y.real, y.imag], dim=-1)
 
-        # Compute positional encoding if not provided
-        print("flag 3.3")
-        if "pe" not in locals():
-            pe = self._compute_positional_encoding(
-                num_tx, num_subcarriers, num_ofdm_symbols
-            )
-        pe = pe.to(self.dtype).to(y.device)
-        # Ensure mcs_ue_mask is properly initialized
-        print("flag 3.4")
-        if mcs_ue_mask_eval is None:
-            mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
-            ).to(y.device)
-        else:
-            mcs_ue_mask = ensure_torch_tensor(mcs_ue_mask_eval).to(y.device)
-        mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+        pe = self.nearest_pilot_dist[:num_tx]
 
-        print("flag 3.7")
+        y = y.to(self.dtype)
+        pe = pe.to(self.dtype)
+        if h_hat_init is not None:
+            h_hat_init = h_hat_init.to(self.dtype)
+        active_tx = active_tx.to(self.dtype)
+
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
-        print("flag 3.71")
         indices = mcs_arr_eval
         llrs = []
         h_hats = []
-        print("flag 3.8")
+
         for llrs_, h_hat_ in zip(llrs_, h_hats_):
             h_hat_ = h_hat_.float()
             _llrs_ = []
-            print("flag 3.9")
+
             for idx in indices:
                 llrs_[idx] = llrs_[idx].float()
                 llrs_[idx] = llrs_[idx].permute(0, 1, 3, 2, 4).unsqueeze(1)
                 llrs_[idx] = self.rg_demapper(llrs_[idx])
                 llrs_[idx] = llrs_[idx][:, :num_tx]
                 llrs_[idx] = torch.flatten(llrs_[idx], start_dim=-2)
-                print("flag 3.10")
+
                 if self.layer_demappers is None:
-                    print("flag 3.11")
                     llrs_[idx] = llrs_[idx].squeeze(-2)
                 else:
-                    print("flag 3.12")
                     llrs_[idx] = self.layer_demappers[idx](llrs_[idx])
 
                 _llrs_.append(llrs_[idx])
-            print("flag 3.13")
+
             llrs.append(_llrs_)
             h_hats.append(h_hat_)
 
         if self.training:
-            print("flag 3.14")
             loss_data = torch.tensor(0.0, dtype=torch.float32)
-            print("flag 3.15")
             for llrs_ in llrs:
                 for idx, llr in enumerate(llrs_):
-                    print("flag 3.16")
                     loss_data_ = self.bce(llr, bits[idx])
                     mcs_ue_mask_ = expand_to_rank(
                         mcs_ue_mask[:, :, indices[idx] : indices[idx] + 1],
@@ -1294,26 +1226,17 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        if isinstance(y, torch.Tensor):
-            y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
-        else:
-            y_tf = y
-
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y_tf, tf.constant(1e-1)])
+            h_hat, _ = self._ls_est([y, torch.tensor(1e-1)])
             h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
-            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
-
-            # Convert TensorFlow tensor back to PyTorch tensor
-            h_hat = torch.from_numpy(h_hat.numpy())
+            h_hat = h_hat.permute(0, 2, 4, 3, 1)
+            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
-
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
@@ -1324,85 +1247,42 @@ class NeuralPUSCHReceiver(nn.Module):
         h = torch.cat([h.real, h.imag], dim=-1)
         return h
 
-    # Add this method
-    def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
-        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
-        for tx in range(num_tx):
-            for sc in range(num_subcarriers):
-                for sym in range(num_ofdm_symbols):
-                    pe[tx, sc, sym, 0] = sc / num_subcarriers
-                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
-        return pe
-
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         print("Flag: Neural receiver -> Forward")
-
         if self._training:
             y, active_tx, b, h, mcs_ue_mask = inputs
-            if isinstance(mcs_arr_eval, torch.Tensor):
-                mcs_arr_eval = mcs_arr_eval.cpu().numpy().tolist()
+            if isinstance(mcs_arr_eval, tf.Tensor):
+                mcs_arr_eval = mcs_arr_eval.numpy().tolist()
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]
             bits = []
             for idx, mcs in enumerate(mcs_arr_eval):
-                bits.append(self._tb_encoders[mcs](b[idx]))
+                bits.append(self._sys_parameters.transmitters[mcs]._tb_encoder(b[idx]))
+
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
+            print("Flag: 1")
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
+
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
+            print("Flag: 2")
             return losses
         else:
             print("Flag: 3")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
-
-            # Ensure inputs are PyTorch tensors
-            y = torch.as_tensor(y)
-            active_tx = torch.as_tensor(active_tx)
-
-            # Estimate channel using PyTorch tensors
             h_hat = self.estimate_channel(y, num_tx)
 
-            # Prepare positional encoding
-            if (
-                y.dim() == 5
-            ):  # If y has shape [batch_size, 1, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-                batch_size, _, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
-                y = y.squeeze(1)  # Remove the second dimension
-            elif (
-                y.dim() == 4
-            ):  # If y has shape [batch_size, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-                batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
-            else:
-                raise ValueError(f"Unexpected shape for y: {y.shape}")
-
-            pe = self._compute_positional_encoding(
-                num_tx, num_subcarriers, num_ofdm_symbols
-            )
-            pe = pe.to(y.device)
-
-            # Reshape y to match the expected input shape
-            y = y.permute(
-                0, 3, 1, 2
-            )  # [batch_size, 2*num_rx_ant, num_subcarriers, num_ofdm_symbols]
-            y = y.reshape(batch_size, -1, num_subcarriers, num_ofdm_symbols)
-
-            # Prepare inputs for _neural_rx
-            inputs = (y, pe, h_hat, active_tx)
-
-            # Call _neural_rx with PyTorch tensors
             llr, h_hat_refined = self._neural_rx(
-                inputs,
+                (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
-
-            # Decode the LLRs
+            print("Flag: 4")
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
-
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
