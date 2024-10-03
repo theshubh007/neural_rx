@@ -992,9 +992,13 @@ class CGNNOFDM(nn.Module):
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
         print("flag CGNNOFDM forward")
+        print(f"Input types: {[type(inp) for inp in inputs]}")
+        print(f"Input shapes: {[inp.shape if hasattr(inp, 'shape') else 'scalar' for inp in inputs]}")
         if self.training:
+            print("flag 1")
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
+            print("flag 2")
             y, h_hat_init, active_tx = inputs
             # if mcs_ue_mask_eval is None:
             #     mcs_ue_mask = torch.nn.functional.one_hot(
@@ -1011,6 +1015,7 @@ class CGNNOFDM(nn.Module):
             else None
         )
         active_tx = torch.as_tensor(active_tx).to(self.dtype)
+        
 
         if mcs_ue_mask_eval is None:
             mcs_ue_mask = torch.nn.functional.one_hot(
