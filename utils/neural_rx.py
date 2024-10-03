@@ -135,45 +135,42 @@ class StateInit(nn.Module):
         num_ofdm_symbols = y.shape[2]
 
         # Print shapes for debugging purposes (optional)
-        print(
-            f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
-        )
+        print(f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}")
 
         # Dynamically compute the reshape size based on the total number of elements in pe
         pe_num_elements = pe.numel()  # Total number of elements in pe tensor
         expected_elements = batch_size * num_tx
 
-        # If the total number of elements in pe is less than expected, try to broadcast or pad it
+        # Efficient handling of reshape when the size doesn't match perfectly
         if pe_num_elements < expected_elements:
-            print(
-                f"Warning: pe_num_elements ({pe_num_elements}) is smaller than expected ({expected_elements}). Adjusting dynamically."
-            )
+            print(f"Warning: pe_num_elements ({pe_num_elements}) is smaller than expected ({expected_elements}). Adjusting dynamically.")
             # Pad pe to match the expected size
             padding = expected_elements - pe_num_elements
             pe = torch.nn.functional.pad(pe, (0, padding))  # Pad on the last dimension
             pe_num_elements = pe.numel()
 
-        # If more elements are present, reshape appropriately
-        remaining_dim = pe_num_elements // expected_elements
+        elif pe_num_elements > expected_elements:
+            print(f"Warning: pe_num_elements ({pe_num_elements}) is larger than expected ({expected_elements}). Truncating.")
+            # Truncate pe to match the expected size
+            pe = pe.view(-1)[:expected_elements]  # Flatten and truncate
+            pe_num_elements = pe.numel()
 
+        remaining_dim = pe_num_elements // expected_elements
+        
         # Reshape pe
         if pe_num_elements % expected_elements != 0:
-            raise ValueError(
-                f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
-            )
-
+            raise ValueError(f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}")
+        
         pe = pe.view(batch_size, num_tx, remaining_dim)
 
         if h_hat is not None:
             # Dynamically reshape h_hat as well
             h_hat_num_elements = h_hat.numel()
             remaining_h_hat_dim = h_hat_num_elements // expected_elements
-
+            
             if h_hat_num_elements % expected_elements != 0:
-                raise ValueError(
-                    f"Cannot reshape h_hat of size {h_hat_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
-                )
-
+                raise ValueError(f"Cannot reshape h_hat of size {h_hat_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}")
+            
             h_hat = h_hat.view(batch_size, num_tx, remaining_h_hat_dim)
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
