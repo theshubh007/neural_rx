@@ -132,24 +132,19 @@ class StateInit(nn.Module):
         )
 
         batch_size = y.shape[0]
+        num_tx = pe.shape[1]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
         num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
-        # Reshape y
-        y = y.view(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
-        y = y.permute(0, 4, 1, 2, 3).contiguous()
-        y = y.view(batch_size, -1)
+        # Print the size of pe tensor
+        print(f"Original size of pe: {pe.numel()}")
 
-        # Reshape pe
-        num_tx = pe.shape[1]
+        # Reshape pe correctly
         pe = pe.view(batch_size, num_tx, -1)
 
         if h_hat is not None:
             h_hat = h_hat.view(batch_size, num_tx, -1)
-
-        # Combine inputs
-        if h_hat is not None:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
             z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
