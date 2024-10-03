@@ -164,9 +164,7 @@ class Parameters:
             self.pilots.append(torch.from_numpy(pilot_np))
 
         # Now stack the PyTorch tensors
-        self.pilots = torch.stack(
-            [torch.from_numpy(pilot.numpy()) for pilot in self.pilots], dim=0
-        )
+        self.pilots = torch.stack(self.pilots, dim=0)
         # self.pilots = torch.tensor(self.pilots)
 
         for pcs in self.pusch_configs:
