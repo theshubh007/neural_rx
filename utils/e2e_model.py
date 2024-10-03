@@ -446,42 +446,35 @@ class E2E_Model(nn.Module):
             else:
                 ch_type = "uma"
 
-            print("flag:18")
+        print("flag:18")
         # Topology update only required for 3GPP pilot patterns
-        max_num_tx = (
-            self._sys_parameters.max_num_tx.item()
-            if isinstance(self._sys_parameters.max_num_tx, torch.Tensor)
-            else self._sys_parameters.max_num_tx
-        )
-        min_ut_velocity = (
-            self._sys_parameters.min_ut_velocity.item()
-            if isinstance(self._sys_parameters.min_ut_velocity, torch.Tensor)
-            else self._sys_parameters.min_ut_velocity
-        )
-        max_ut_velocity = (
-            self._sys_parameters.max_ut_velocity.item()
-            if isinstance(self._sys_parameters.max_ut_velocity, torch.Tensor)
-            else self._sys_parameters.max_ut_velocity
-        )
         topology = gen_single_sector_topology(
             batch_size.item(),
-            max_num_tx,
+            self._sys_parameters.max_num_tx,
             ch_type,
-            min_ut_velocity=min_ut_velocity,
-            max_ut_velocity=max_ut_velocity,
+            min_ut_velocity=self._sys_parameters.min_ut_velocity,
+            max_ut_velocity=self._sys_parameters.max_ut_velocity,
             indoor_probability=0.0,
-        )
+        )  # disable indoor users
         self._sys_parameters.channel_model.set_topology(*topology)
 
         # Apply channel
         print("flag:19")
+
+        # Convert PyTorch tensor to TensorFlow tensor
+        x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
+        no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
+
         if self._sys_parameters.channel_type == "AWGN":
             print("flag:20")
-            y = self._channel([x, no])
+            y_tf = self._channel([x_tf, no_tf])
+            y = torch.from_numpy(y_tf.numpy())
             h = torch.ones_like(y)  # simple AWGN channel
         else:
             print("flag:21")
-            y, h = self._channel([x, no])
+            y_tf, h_tf = self._channel([x_tf, no_tf])
+            y = torch.from_numpy(y_tf.numpy())
+            h = torch.from_numpy(h_tf.numpy())
 
         ###################################
         # Receiver
