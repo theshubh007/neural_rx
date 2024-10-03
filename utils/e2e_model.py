@@ -281,13 +281,13 @@ class E2E_Model(nn.Module):
         print("E2E Model: Forward")
         if mcs_arr_eval_idx is None:
             mcs_arr_eval_idx = self._mcs_arr_eval_idx
+
         if num_tx is None:
             num_tx = self._sys_parameters.max_num_tx
 
         active_dmrs = self._active_dmrs_mask(
             batch_size, num_tx, self._sys_parameters.max_num_tx
         )
-
         print("flag:1")
         if mcs_ue_mask is None:
             print("flag:2")
@@ -295,17 +295,33 @@ class E2E_Model(nn.Module):
                 mcs_arr_eval_idx, int
             ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
 
-            # Create one-hot encoding using PyTorch
-            mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval_idx),
-                num_classes=len(self._sys_parameters.mcs_index),
+            # Convert mcs_arr_eval_idx to a TensorFlow tensor
+            mcs_arr_eval_idx_tf = tf.constant(mcs_arr_eval_idx)
+
+            # Create one-hot encoding
+            mcs_ue_mask = tf.one_hot(
+                mcs_arr_eval_idx_tf, depth=len(self._sys_parameters.mcs_index)
             )
-            mcs_ue_mask = mcs_ue_mask.unsqueeze(0).unsqueeze(0)
-            mcs_ue_mask = mcs_ue_mask.repeat(
-                batch_size, self._sys_parameters.max_num_tx, 1
+            # Expand dimensions
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+            mcs_ue_mask = tf.expand_dims(mcs_ue_mask, axis=0)
+
+            # Tile the tensor instead of using repeat
+            mcs_ue_mask = tf.tile(
+                mcs_ue_mask, [batch_size, self._sys_parameters.max_num_tx, 1]
             )
 
             mcs_arr_eval = [mcs_arr_eval_idx]
+            # mcs_ue_mask = torch.nn.functional.one_hot(
+            #     torch.tensor(mcs_arr_eval_idx),
+            #     num_classes=len(self._sys_parameters.mcs_index),
+            # )
+            # mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+            # mcs_ue_mask = mcs_ue_mask.repeat(
+            #     batch_size, self._sys_parameters.max_num_tx, 1
+            # )
+            # mcs_arr_eval = [mcs_arr_eval_idx]
+            print("flag:3")
         else:
             print("flag:4")
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
@@ -323,17 +339,14 @@ class E2E_Model(nn.Module):
         b = []
         for idx in range(len(mcs_arr_eval)):
             b.append(
-                torch.randint(
-                    2,
-                    size=(
+                self._source(
+                    [
                         batch_size,
                         self._sys_parameters.max_num_tx,
                         self._transmitters[mcs_arr_eval[idx]]._tb_size,
-                    ),
-                    dtype=torch.float32,
+                    ]
                 )
             )
-
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
@@ -345,19 +358,9 @@ class E2E_Model(nn.Module):
         x = None
         for idx, mcs in enumerate(mcs_arr_eval):
             _mcs_ue_mask = mcs_ue_mask_torch[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
-            print("flag:9.1")
-            _mcs_ue_mask = mcs_ue_mask[:, :, mcs].unsqueeze(-1).unsqueeze(-1)
 
-            # Convert b[idx] to NumPy array if it's a PyTorch tensor
-            b_np = (
-                b[idx].detach().cpu().numpy()
-                if isinstance(b[idx], torch.Tensor)
-                else b[idx]
-            )
-            # Use the TensorFlow-based transmitter
-            x_tf = self._transmitters[mcs](b_np)
-
-            # Convert the result back to PyTorch tensor
+            # Assuming self._transmitters[mcs] is a Sionna component
+            x_tf = self._transmitters[mcs](b[idx])
             x_torch = torch.from_numpy(x_tf.numpy())
 
             # Adjust _mcs_ue_mask to match x_torch shape
@@ -371,10 +374,9 @@ class E2E_Model(nn.Module):
             else:
                 x += x_torch * _mcs_ue_mask
 
-        print("flag:9.3")
         # Convert TensorFlow tensor to PyTorch tensor
         active_dmrs_torch = torch.from_numpy(active_dmrs.numpy())
-        print("flag:9.4")
+
         # Ensure a_tx has the same shape as x
         a_tx = expand_to_rank(active_dmrs_torch, x.dim(), axis=-1)
 
@@ -446,59 +448,39 @@ class E2E_Model(nn.Module):
             else:
                 ch_type = "uma"
 
-        print("flag:18")
-        # Topology update only required for 3GPP pilot patterns
-        topology = gen_single_sector_topology(
-            batch_size.item(),
-            self._sys_parameters.max_num_tx,
-            ch_type,
-            min_ut_velocity=self._sys_parameters.min_ut_velocity,
-            max_ut_velocity=self._sys_parameters.max_ut_velocity,
-            indoor_probability=0.0,
-        )  # disable indoor users
-        self._sys_parameters.channel_model.set_topology(*topology)
+            print("flag:18")
+            # Topology update only required for 3GPP pilot patterns
+            topology = gen_single_sector_topology(
+                batch_size,
+                self._sys_parameters.max_num_tx,
+                ch_type,
+                min_ut_velocity=self._sys_parameters.min_ut_velocity,
+                max_ut_velocity=self._sys_parameters.max_ut_velocity,
+                indoor_probability=0.0,
+            )  # disable indoor users
+            self._sys_parameters.channel_model.set_topology(*topology)
 
         # Apply channel
-        print("flag:19")
-
-        # Check if x and no are PyTorch tensors
-        if isinstance(x, torch.Tensor):
-            x_tf = tf.convert_to_tensor(x.detach().cpu().numpy())
-        else:
-            x_tf = x  # Assume it's already a TensorFlow tensor
-
-        if isinstance(no, torch.Tensor):
-            no_tf = tf.convert_to_tensor(no.detach().cpu().numpy())
-        else:
-            no_tf = no  # Assume it's already a TensorFlow tensor
         if self._sys_parameters.channel_type == "AWGN":
-            print("flag:20")
-            y_tf = self._channel([x_tf, no_tf])
-            y = torch.from_numpy(y_tf.numpy())
+            y = self._channel([x, no])
             h = torch.ones_like(y)  # simple AWGN channel
         else:
-            print("flag:21")
-            y_tf, h_tf = self._channel([x_tf, no_tf])
-            y = torch.from_numpy(y_tf.numpy())
-            h = torch.from_numpy(h_tf.numpy())
+            y, h = self._channel([x, no])
 
         ###################################
         # Receiver
         ###################################
-        print("flag:22")
+
         if self._sys_parameters.system in (
             "baseline_lmmse_kbest",
             "baseline_lmmse_lmmse",
             "baseline_lsnn_lmmse",
             "baseline_lslin_lmmse",
         ):
-            print("flag:23")
             b_hat = self._receiver([y, no])
             if self._return_tb_status:
-                print("flag:24")
                 b_hat, tb_crc_status = b_hat
             else:
-                print("flag:25")
                 tb_crc_status = None
 
             # return b[0] and b_hat only for active DMRS ports
@@ -512,12 +494,11 @@ class E2E_Model(nn.Module):
             "baseline_perf_csi_kbest",
             "baseline_perf_csi_lmmse",
         ):
-            print("flag:26")
+
             # perfect CSI receiver needs ground truth channel
             b_hat = self._receiver([y, h, no])
 
             if self._return_tb_status:
-                print("flag:27")
                 b_hat, tb_crc_status = b_hat
             else:
                 tb_crc_status = None
@@ -529,7 +510,7 @@ class E2E_Model(nn.Module):
             )
 
         elif self._sys_parameters.system == "nrx":
-            print("flag:28")
+
             # in training mode, only the losses are required
             if self._training:
                 losses = self._receiver(
@@ -542,7 +523,6 @@ class E2E_Model(nn.Module):
                 # - refined channel estimate h_hat_refined
                 # - initial channel estimate h_hat
                 # - [optional] transport block CRC status
-                print("flag:29")
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
                     (y, active_dmrs), mcs_arr_eval, mcs_ue_mask_eval=mcs_ue_mask
                 )
@@ -553,7 +533,6 @@ class E2E_Model(nn.Module):
                 # Data
                 # b only holds bits corresponding to MCS indices specified
                 # in mcs_arr_eval --> evaluation for one MCS only --> b[0]
-                print("flag:30")
                 b, b_hat, tb_crc_status = self._mask_active_dmrs(
                     b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
                 )
