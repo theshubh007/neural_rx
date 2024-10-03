@@ -281,13 +281,13 @@ class E2E_Model(nn.Module):
         print("E2E Model: Forward")
         if mcs_arr_eval_idx is None:
             mcs_arr_eval_idx = self._mcs_arr_eval_idx
-
         if num_tx is None:
             num_tx = self._sys_parameters.max_num_tx
 
         active_dmrs = self._active_dmrs_mask(
             batch_size, num_tx, self._sys_parameters.max_num_tx
         )
+
         print("flag:1")
         if mcs_ue_mask is None:
             print("flag:2")
@@ -300,18 +300,10 @@ class E2E_Model(nn.Module):
                 torch.tensor(mcs_arr_eval_idx),
                 num_classes=len(self._sys_parameters.mcs_index),
             )
-
-            # Expand dimensions
             mcs_ue_mask = mcs_ue_mask.unsqueeze(0).unsqueeze(0)
-
-            # Repeat the tensor instead of using tile
-            mcs_ue_mask = mcs_ue_mask.repeat(
-                batch_size, self._sys_parameters.max_num_tx, 1
-            )
+            mcs_ue_mask = mcs_ue_mask.repeat(batch_size, self._sys_parameters.max_num_tx, 1)
 
             mcs_arr_eval = [mcs_arr_eval_idx]
-
-            print("flag:3")
         else:
             print("flag:4")
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
@@ -329,14 +321,17 @@ class E2E_Model(nn.Module):
         b = []
         for idx in range(len(mcs_arr_eval)):
             b.append(
-                self._source(
-                    [
+                torch.randint(
+                    2,
+                    size=(
                         batch_size,
                         self._sys_parameters.max_num_tx,
                         self._transmitters[mcs_arr_eval[idx]]._tb_size,
-                    ]
+                    ),
+                    dtype=torch.float32,
                 )
             )
+
         print("flag:8")
         if self._training:
             self._set_transmitter_random_pilots()
