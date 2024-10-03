@@ -1323,6 +1323,16 @@ class NeuralPUSCHReceiver(nn.Module):
         h = torch.cat([h.real, h.imag], dim=-1)
         return h
 
+    # Add this method
+    def _compute_positional_encoding(self, num_tx, num_subcarriers, num_ofdm_symbols):
+        pe = torch.zeros(num_tx, num_subcarriers, num_ofdm_symbols, 2)
+        for tx in range(num_tx):
+            for sc in range(num_subcarriers):
+                for sym in range(num_ofdm_symbols):
+                    pe[tx, sc, sym, 0] = sc / num_subcarriers
+                    pe[tx, sc, sym, 1] = sym / num_ofdm_symbols
+        return pe
+
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         print("Flag: Neural receiver -> Forward")
 
