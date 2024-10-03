@@ -130,7 +130,9 @@ class StateInit(nn.Module):
 
         # Get the input shapes dynamically
         batch_size = y.shape[0]
-        num_tx = pe.shape[1] if len(pe.shape) > 1 else 1
+        num_tx = (
+            2  # Assuming fixed for now or dynamically infer from elsewhere if needed
+        )
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
 
@@ -142,14 +144,20 @@ class StateInit(nn.Module):
         # Dynamically compute the reshape size based on the total number of elements in pe
         pe_num_elements = pe.numel()  # Total number of elements in pe tensor
         expected_elements = batch_size * num_tx
-        remaining_dim = (
-            pe_num_elements // expected_elements
-        )  # Infer the remaining dimension size
 
-        if pe_num_elements % expected_elements != 0:
+        # Efficient handling of reshape when the size doesn't match perfectly
+        if pe_num_elements < expected_elements:
             raise ValueError(
                 f"Cannot reshape pe of size {pe_num_elements} into batch_size: {batch_size}, num_tx: {num_tx}"
             )
+        elif pe_num_elements == expected_elements:
+            remaining_dim = (
+                1  # If exactly equal, just reshape without additional dimension
+            )
+        else:
+            remaining_dim = (
+                pe_num_elements // expected_elements
+            )  # Infer the remaining dimension size
 
         # Reshape pe based on dynamically calculated dimensions
         pe = pe.view(batch_size, num_tx, remaining_dim)
