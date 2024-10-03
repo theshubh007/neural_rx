@@ -1027,28 +1027,34 @@ class CGNNOFDM(nn.Module):
         num_tx = active_tx.shape[1]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
+        print("flag 3.1")
 
         if self.sys_parameters.mask_pilots:
             rg_type = self.rg.build_type_grid()
             rg_type = rg_type.unsqueeze(0).expand(y.shape)
             y = torch.where(rg_type == 1, torch.tensor(0.0, dtype=y.dtype), y)
-
+        
+        print("flag 3.2")
         y = y[:, 0]
         y = y.permute(0, 3, 2, 1)
         y = torch.cat([y.real, y.imag], dim=-1)
 
         # Compute positional encoding
+        print("flag 3.3")
         pe = self._compute_positional_encoding(
             num_tx, num_subcarriers, num_ofdm_symbols
         )
         pe = pe.to(self.dtype).to(y.device)
 
         # Ensure mcs_ue_mask is properly initialized
+        print("flag 3.4")
         if mcs_ue_mask_eval is None:
+            print("flag 3.5")
             mcs_ue_mask = torch.nn.functional.one_hot(
                 torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
             ).to(y.device)
         else:
+            print("flag 3.6")
             mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
