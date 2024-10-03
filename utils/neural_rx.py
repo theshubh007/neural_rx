@@ -927,7 +927,7 @@ class CGNNOFDM(nn.Module):
         self.dtype = dtype
         self.num_mcss_supported = len(sys_parameters.mcs_index)
         self.rg = sys_parameters.transmitters[0]._resource_grid
-
+        print("flag CGNNOFDM initialized")
         if self.sys_parameters.mask_pilots:
             print("Masking pilots for pilotless communications.")
 
@@ -986,6 +986,7 @@ class CGNNOFDM(nn.Module):
         return pe
 
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
+        print("flag CGNNOFDM forward")
         if self.training:
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
         else:
@@ -1241,22 +1242,25 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        y_tf = tf.convert_to_tensor(y.detach().cpu().numpy())
-        if self._sys_parameters.initial_chest == "ls":
-            if self._sys_parameters.mask_pilots:
-                raise ValueError(
-                    "Cannot use initial channel estimator if pilots are masked."
-                )
-            h_hat, _ = self._ls_est([y_tf, tf.constant(1e-1)])
-            h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
-            h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
+        if isinstance(y, torch.Tensor):
+            y = tf.convert_to_tensor(y.detach().cpu().numpy())
 
-            # Convert TensorFlow tensor back to PyTorch tensor
-            h_hat = torch.from_numpy(h_hat.numpy()).to(y.device)
-        elif self._sys_parameters.initial_chest is None:
-            h_hat = None
-        return h_hat
+            if self._sys_parameters.initial_chest == "ls":
+                if self._sys_parameters.mask_pilots:
+                    raise ValueError(
+                        "Cannot use initial channel estimator if pilots are masked."
+                    )
+                h_hat, _ = self._ls_est([y, tf.constant(1e-1)])
+                h_hat = h_hat[:, 0, :, :num_tx, 0]
+                h_hat = tf.transpose(h_hat, perm=[0, 2, 4, 3, 1])
+                h_hat = tf.concat([tf.math.real(h_hat), tf.math.imag(h_hat)], axis=-1)
+
+                # Convert TensorFlow tensor back to PyTorch tensor
+                h_hat = torch.from_numpy(h_hat.numpy())
+            elif self._sys_parameters.initial_chest is None:
+                h_hat = None
+
+            return h_hat
 
     def preprocess_channel_ground_truth(self, h):
         h = h.squeeze(1)
@@ -1291,46 +1295,39 @@ class NeuralPUSCHReceiver(nn.Module):
             return losses
         else:
             print("Flag: 3")
-            y, active_tx = inputs
-            num_tx = active_tx.shape[1]
+        y, active_tx = inputs
+        num_tx = active_tx.shape[1]
 
-            # Convert PyTorch tensors to NumPy arrays
-            y_np = y.detach().cpu().numpy()
-            active_tx_np = active_tx.detach().cpu().numpy()
+        # Ensure y and active_tx are PyTorch tensors
+        y = torch.as_tensor(y)
+        active_tx = torch.as_tensor(active_tx)
 
-            # Estimate channel using TensorFlow tensors
-            y_tf = tf.convert_to_tensor(y_np)
-            h_hat_tf = self.estimate_channel(y_tf, num_tx)
+        print("Flag: 3.1")
+        # Estimate channel using PyTorch tensors
+        h_hat = self.estimate_channel(y, num_tx)
 
-            print("Flag: 3.2")
+        print("Flag: 3.2")
+        # Convert PyTorch tensors to NumPy arrays
+        y_np = y.detach().cpu().numpy()
+        h_hat_np = h_hat.detach().cpu().numpy() if h_hat is not None else None
+        active_tx_np = active_tx.detach().cpu().numpy()
 
-            # Convert TensorFlow tensor back to NumPy array
-            h_hat_np = h_hat_tf.numpy() if h_hat_tf is not None else None
+        print("Flag: 3.3")
+        # Call _neural_rx with NumPy arrays
+        llr, h_hat_refined = self._neural_rx(
+            (y_np, h_hat_np, active_tx_np),
+            [mcs_arr_eval[0]],
+            mcs_ue_mask_eval=mcs_ue_mask_eval,
+        )
 
-            print("Flag: 3.3")
+        print("Flag: 4")
+        # Convert results back to PyTorch tensors
+        llr_torch = torch.from_numpy(llr)
+        h_hat_refined_torch = torch.from_numpy(h_hat_refined)
 
-            # Call _neural_rx with NumPy arrays
-            llr, h_hat_refined = self._neural_rx(
-                (y_np, h_hat_np, active_tx_np),
-                [mcs_arr_eval[0]],
-                mcs_ue_mask_eval=mcs_ue_mask_eval,
-            )
+        b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr_torch)
 
-            print("Flag: 4")
-
-            # Convert results back to PyTorch tensors
-            llr_torch = torch.from_numpy(llr)
-            h_hat_refined_torch = torch.from_numpy(h_hat_refined)
-
-            b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr_torch)
-
-            # Return all four variables
-            return (
-                b_hat,
-                h_hat_refined_torch,
-                torch.from_numpy(h_hat_np) if h_hat_np is not None else None,
-                tb_crc_status,
-            )
+        return b_hat, h_hat_refined_torch, h_hat, tb_crc_status
 
 
 ################################
