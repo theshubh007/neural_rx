@@ -993,7 +993,9 @@ class CGNNOFDM(nn.Module):
     def forward(self, inputs, mcs_arr_eval, mcs_ue_mask_eval=None):
         print("flag CGNNOFDM forward")
         print(f"Input types: {[type(inp) for inp in inputs]}")
-        print(f"Input shapes: {[inp.shape if hasattr(inp, 'shape') else 'scalar' for inp in inputs]}")
+        print(
+            f"Input shapes: {[inp.shape if hasattr(inp, 'shape') else 'scalar' for inp in inputs]}"
+        )
         if self.training:
             print("flag 1")
             y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
@@ -1015,15 +1017,12 @@ class CGNNOFDM(nn.Module):
             else None
         )
         active_tx = torch.as_tensor(active_tx).to(self.dtype)
-        
-
-        if mcs_ue_mask_eval is None:
-            mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
+        print("flag 3")
+        # Check if any of the tensors are scalars and handle accordingly
+        if y.ndim == 0 or h_hat_init.ndim == 0 or active_tx.ndim == 0:
+            raise ValueError(
+                "One or more input tensors are scalars. Expected multi-dimensional tensors."
             )
-        else:
-            mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval)
-        mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
         num_tx = active_tx.shape[1]
         num_subcarriers = y.shape[1]
@@ -1044,11 +1043,14 @@ class CGNNOFDM(nn.Module):
         )
         pe = pe.to(self.dtype).to(y.device)
 
-        y = y.to(self.dtype)
-        pe = pe.to(self.dtype)
-        if h_hat_init is not None:
-            h_hat_init = h_hat_init.to(self.dtype)
-        active_tx = active_tx.to(self.dtype)
+        # Ensure mcs_ue_mask is properly initialized
+        if mcs_ue_mask_eval is None:
+            mcs_ue_mask = torch.nn.functional.one_hot(
+                torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
+            ).to(y.device)
+        else:
+            mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
+        mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
 
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
 
