@@ -8,6 +8,7 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
+
 ##### Neural Receiver #####
 import torch
 import torch.nn as nn
@@ -16,12 +17,28 @@ from tensorflow.keras import Model
 from sionna.utils import (
     flatten_dims,
     split_dim,
-    expand_to_rank,
+    # expand_to_rank,
 )
 import numpy as np
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, PUSCHLSChannelEstimator
 from sionna.nr import LayerDemapper as SionnaLayerDemapper
+
+
+def expand_to_rank(tensor, rank, axis=0):
+    if isinstance(tensor, (int, float)):
+        tensor = torch.tensor([tensor])
+    elif isinstance(tensor, tf.Tensor) and tensor.shape == ():
+        tensor = torch.tensor([tensor.numpy().item()])
+    elif isinstance(tensor, torch.Tensor) and tensor.dim() == 0:
+        tensor = tensor.unsqueeze(0)
+
+    while len(tensor.shape) < rank:
+        if axis == -1:
+            tensor = tensor.unsqueeze(-1)
+        else:
+            tensor = tensor.unsqueeze(0)
+    return tensor
 
 
 class StateInit(nn.Module):
