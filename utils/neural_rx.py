@@ -131,22 +131,24 @@ class StateInit(nn.Module):
             f"Input shapes: y: {y.shape}, pe: {pe.shape}, h_hat: {h_hat.shape if h_hat is not None else 'None'}"
         )
 
-        batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant = y.shape
+        batch_size = y.shape[0]
         num_tx = pe.shape[1]
+        num_subcarriers = y.shape[1]
+        num_ofdm_symbols = y.shape[2]
+        num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
-        # Reshape and expand pe to match y's batch size
-        pe = pe.squeeze(0).unsqueeze(0).expand(batch_size, -1, -1, -1, -1)
+        # Reshape y
+        y = y.reshape(
+            batch_size * num_tx, num_subcarriers * num_ofdm_symbols * num_rx_ant * 2
+        )
 
-        # Reshape y to include num_tx dimension
-        y = y.unsqueeze(1).expand(-1, num_tx, -1, -1, -1)
-
-        # Reshape inputs to 2D for processing
-        y = y.reshape(-1, num_subcarriers * num_ofdm_symbols * num_rx_ant)
-        pe = pe.reshape(-1, num_subcarriers * num_ofdm_symbols * 2)
+        # Reshape pe
+        pe = pe.permute(0, 2, 3, 1, 4).contiguous()
+        pe = pe.reshape(batch_size * num_tx, num_subcarriers * num_ofdm_symbols * 2)
 
         if h_hat is not None:
             h_hat = h_hat.reshape(
-                -1, num_subcarriers * num_ofdm_symbols * h_hat.shape[-1]
+                batch_size * num_tx, num_subcarriers * num_ofdm_symbols * num_rx_ant * 2
             )
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
