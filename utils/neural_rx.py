@@ -25,6 +25,17 @@ from sionna.nr import TBDecoder, PUSCHLSChannelEstimator
 from sionna.nr import LayerDemapper as SionnaLayerDemapper
 
 
+def ensure_torch_tensor(tensor):
+    if isinstance(tensor, tf.Tensor):
+        return torch.from_numpy(tensor.numpy())
+    elif isinstance(tensor, np.ndarray):
+        return torch.from_numpy(tensor)
+    elif isinstance(tensor, torch.Tensor):
+        return tensor
+    else:
+        return torch.tensor(tensor)
+
+
 def expand_to_rank(tensor, rank, axis=0):
     if isinstance(tensor, (int, float)):
         tensor = torch.tensor([tensor])
@@ -1016,17 +1027,13 @@ class CGNNOFDM(nn.Module):
         )
         if self.training:
             print("flag 1")
-            y, h_hat_init, active_tx, bits, h, mcs_ue_mask = inputs
+            y, h_hat_init, active_tx, bits, h, mcs_ue_mask = [
+                ensure_torch_tensor(x) for x in inputs
+            ]
         else:
             print("flag 2")
-            y, h_hat_init, active_tx = inputs
-            # if mcs_ue_mask_eval is None:
-            #     mcs_ue_mask = torch.nn.functional.one_hot(
-            #         torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
-            #     )
-            # else:
-            #     mcs_ue_mask = mcs_ue_mask_eval
-            # mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
+            y, h_hat_init, active_tx = [ensure_torch_tensor(x) for x in inputs]
+
         # Convert inputs to PyTorch tensors if they aren't already
         y = torch.as_tensor(y).to(self.dtype)
         h_hat_init = (
@@ -1074,44 +1081,11 @@ class CGNNOFDM(nn.Module):
         # Ensure mcs_ue_mask is properly initialized
         print("flag 3.4")
         if mcs_ue_mask_eval is None:
-            print("flag 3.5")
             mcs_ue_mask = torch.nn.functional.one_hot(
                 torch.tensor(mcs_arr_eval[0]), num_classes=self.num_mcss_supported
             ).to(y.device)
         else:
-            print("flag 3.6")
-            # Handle scalar tensor case
-            # Handle scalar tensor case
-            if isinstance(mcs_ue_mask_eval, (tf.Tensor, torch.Tensor)):
-                if tf.is_tensor(mcs_ue_mask_eval):
-                    # TensorFlow tensor
-                    if tf.rank(mcs_ue_mask_eval) == 0:
-                        mcs_ue_mask = torch.nn.functional.one_hot(
-                            torch.tensor(mcs_ue_mask_eval.numpy().item()),
-                            num_classes=self.num_mcss_supported,
-                        ).to(y.device)
-                    else:
-                        mcs_ue_mask = torch.from_numpy(mcs_ue_mask_eval.numpy()).to(
-                            y.device
-                        )
-                else:
-                    # PyTorch tensor
-                    if mcs_ue_mask_eval.dim() == 0:
-                        mcs_ue_mask = torch.nn.functional.one_hot(
-                            torch.tensor(mcs_ue_mask_eval.item()),
-                            num_classes=self.num_mcss_supported,
-                        ).to(y.device)
-                    else:
-                        mcs_ue_mask = mcs_ue_mask_eval.to(y.device)
-            elif isinstance(mcs_ue_mask_eval, (int, float)):
-                # Handle scalar Python types
-                mcs_ue_mask = torch.nn.functional.one_hot(
-                    torch.tensor(mcs_ue_mask_eval),
-                    num_classes=self.num_mcss_supported,
-                ).to(y.device)
-            else:
-                # Assume it's a numpy array or other type that can be converted to a tensor
-                mcs_ue_mask = torch.as_tensor(mcs_ue_mask_eval).to(y.device)
+            mcs_ue_mask = ensure_torch_tensor(mcs_ue_mask_eval).to(y.device)
 
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
         print("flag 3.7")
