@@ -1298,9 +1298,15 @@ class NeuralPUSCHReceiver(nn.Module):
         y, active_tx = inputs
         num_tx = active_tx.shape[1]
 
-        # Ensure y and active_tx are PyTorch tensors
-        y = torch.as_tensor(y)
-        active_tx = torch.as_tensor(active_tx)
+        # Convert TensorFlow tensors to PyTorch tensors if necessary
+        if isinstance(y, tf.Tensor):
+            y = torch.from_numpy(y.numpy())
+        if isinstance(active_tx, tf.Tensor):
+            active_tx = torch.from_numpy(active_tx.numpy())
+
+        # # Ensure y and active_tx are PyTorch tensors
+        # y = torch.as_tensor(y)
+        # active_tx = torch.as_tensor(active_tx)
 
         print("Flag: 3.1")
         # Estimate channel using PyTorch tensors
