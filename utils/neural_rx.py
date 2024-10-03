@@ -1090,7 +1090,8 @@ class CGNNOFDM(nn.Module):
         mcs_ue_mask = expand_to_rank(mcs_ue_mask, 3, axis=0)
         print("flag 3.7")
         llrs_, h_hats_ = self.cgnn([y, pe, h_hat_init, active_tx, mcs_ue_mask])
-
+        
+        print("flag 3.")
         indices = mcs_arr_eval
         llrs = []
         h_hats = []
