@@ -172,39 +172,40 @@ class StateInit(nn.Module):
         )
 
         batch_size = y.shape[0]
-        num_tx = pe.shape[1]
+        num_tx = pe.shape[0]
         num_subcarriers = y.shape[1]
         num_ofdm_symbols = y.shape[2]
         num_rx_ant = y.shape[3] // 2  # Assuming real and imaginary parts are stacked
 
         # Reshape y
-        y = y.reshape(batch_size, num_subcarriers * num_ofdm_symbols, num_rx_ant * 2)
-        y = y.unsqueeze(1).repeat(1, num_tx, 1, 1)
+        y = y.reshape(batch_size, num_subcarriers, num_ofdm_symbols, num_rx_ant, 2)
+        y = y.permute(0, 4, 1, 2, 3).contiguous()
+        y = y.reshape(batch_size, -1)
 
         # Reshape pe
-        pe = pe.permute(1, 2, 3, 0, 4).contiguous()
-        pe = pe.reshape(num_tx, num_subcarriers * num_ofdm_symbols, 2)
+        if pe.dim() == 4:
+            pe = pe.permute(1, 2, 3, 0).contiguous()
+        elif pe.dim() == 5:
+            pe = pe.permute(1, 2, 3, 0, 4).contiguous()
+        pe = pe.reshape(num_tx, -1, pe.shape[-1])
         pe = pe.unsqueeze(0).repeat(batch_size, 1, 1, 1)
 
         if h_hat is not None:
-            h_hat = h_hat.reshape(
-                batch_size, num_tx, num_subcarriers * num_ofdm_symbols, num_rx_ant * 2
-            )
-            z = torch.cat([y, pe, h_hat], dim=-1)
+            h_hat = h_hat.reshape(batch_size, num_tx, -1)
+            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe, h_hat], dim=-1)
         else:
-            z = torch.cat([y, pe], dim=-1)
+            z = torch.cat([y.unsqueeze(1).expand(-1, num_tx, -1), pe], dim=-1)
 
         # Apply the neural network
-        z = z.permute(0, 1, 3, 2)  # [batch_size, num_tx, channels, height]
+        z = z.view(batch_size * num_tx, -1, 1, 1)
         for conv in self.hidden_conv:
             z = conv(z)
         z = self.output_conv(z)
 
         # Reshape output
-        z = z.permute(0, 1, 3, 2)
-        s0 = z.reshape(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
+        z = z.view(batch_size, num_tx, num_subcarriers, num_ofdm_symbols, -1)
 
-        return s0  # Initial state of every user
+        return z  # Initial state of every user
 
 
 class AggregateUserStates(nn.Module):
