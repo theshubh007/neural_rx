@@ -385,6 +385,13 @@ class E2E_Model(nn.Module):
             _mcs_ue_mask = (
                 mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).expand_as(x)
             )
+
+            # Print shapes to debug
+            print(f"Shape of _mcs_ue_mask: {_mcs_ue_mask.shape}")
+            print(
+                f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {self._transmitters[mcs_arr_eval[idx]](b[idx]).shape}"
+            )
+
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
         # Mask non-active DMRS ports by multiplying with 0
