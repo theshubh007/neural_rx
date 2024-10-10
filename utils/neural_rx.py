@@ -1097,7 +1097,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
-            h_hat = self.estimate_channel(y, num_tx, no=no)
+            h_hat = self.estimate_channel(y, num_tx, None)
 
             # Reshaping `h` to the expected shape and apply precoding matrices
             if h is not None:
@@ -1112,6 +1112,7 @@ class NeuralPUSCHReceiver(nn.Module):
         else:
             # In evaluation, we expect only 2 inputs
             print("NeuralPUSCHReceiver forward else")
+            print(inputs)
             y, active_tx, b, h, no = inputs
             print(y.shape, y)
             print(active_tx.shape, active_tx)
@@ -1120,7 +1121,7 @@ class NeuralPUSCHReceiver(nn.Module):
             num_tx = active_tx.shape[1]
 
             print(f"Number of transmit antennas (num_tx): {num_tx}")
-            h_hat = self.estimate_channel(y, num_tx)
+            h_hat = self.estimate_channel(y, num_tx, no=no)
             print(h_hat.shape, h_hat)
 
             # Call the neural receiver and get llr and h_hat_refined
