@@ -866,6 +866,59 @@ class CGNNOFDM(nn.Module):
             return llrs[-1][0], h_hats[-1]
 
 
+import torch
+
+
+class ManualChannelEstimator:
+    def __init__(self, pilots):
+        """
+        Initialize the manual channel estimator with known pilot symbols.
+
+        Args:
+            pilots (torch.Tensor): The pilot symbols for the transmitted signals.
+                                   Shape should be [num_tx, num_subcarriers].
+        """
+        self.pilots = (
+            pilots  # Known transmitted pilots, shape: [num_tx, num_subcarriers]
+        )
+
+    def estimate_channel(self, y, num_tx):
+        """
+        Estimate the channel using the Least Squares (LS) method.
+
+        Args:
+            y (torch.Tensor): Received signal tensor of shape [batch_size, num_rx, num_subcarriers].
+            num_tx (int): The number of transmitters.
+
+        Returns:
+            h_hat (torch.Tensor): Estimated channel matrix of shape [batch_size, num_rx, num_tx, num_subcarriers].
+        """
+        batch_size, num_rx, num_subcarriers = y.shape
+
+        # Check if the pilot tensor shape matches num_tx and num_subcarriers
+        assert self.pilots.shape == (
+            num_tx,
+            num_subcarriers,
+        ), f"Expected pilots of shape ({num_tx}, {num_subcarriers}), but got {self.pilots.shape}"
+
+        # Initialize the channel estimate tensor
+        h_hat = torch.zeros(
+            (batch_size, num_rx, num_tx, num_subcarriers), dtype=torch.complex64
+        )
+
+        # Perform LS estimation for each transmitter
+        for tx in range(num_tx):
+            # Get the pilot for this transmitter
+            pilot_tx = self.pilots[tx, :]  # Shape: [num_subcarriers]
+
+            # For each receiver, estimate the channel at each subcarrier
+            for rx in range(num_rx):
+                # LS estimation: h_hat = y / pilots (element-wise division)
+                h_hat[:, rx, tx, :] = y[:, rx, :] / pilot_tx
+
+        return h_hat
+
+
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False, **kwargs):
 
@@ -945,53 +998,11 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        """Channel estimation logic using TensorFlow for LS Estimation."""
-        if self._sys_parameters.initial_chest == "ls":
-            if self._sys_parameters.mask_pilots:
-                raise ValueError(
-                    "Cannot use initial channel estimator if pilots are masked."
-                )
-
-            import tensorflow as tf
-
-            # Debugging info for the shape of input tensor `y`
-            print("Original y shape:", y.shape)
-
-            # Convert PyTorch tensor `y` to TensorFlow tensor
-            y_numpy = y.cpu().numpy()
-            y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
-
-            # Total number of elements in the input tensor
-            total_elements = y.numel()
-
-            # Directly reshape based on total elements
-            # Infer the last dimension (fft_size) dynamically
-            inferred_shape = [-1, self._sys_parameters.num_rx_antennas, self._sys_parameters.transmitters[0]._resource_grid.num_ofdm_symbols]
-            inferred_shape.append(total_elements // np.prod(inferred_shape))
-
-            # Reshape `y_tf` based on inferred shape
-            y_tf = tf.reshape(y_tf, inferred_shape)
-
-            # Debugging info for the reshaped `y_tf`
-            print("Reshaped y_tf shape:", y_tf.shape)
-
-            # Perform the channel estimation with TensorFlow
-            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
-
-            # Convert the result back to NumPy and then to PyTorch
-            h_hat_numpy = h_hat_tf.numpy()  # Convert TensorFlow tensor to NumPy array
-            h_hat = torch.from_numpy(h_hat_numpy).to(
-                y.dtype
-            )  # Convert back to PyTorch tensor
-
-            # Perform the necessary PyTorch operations on h_hat
-            h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
-
-        elif self._sys_parameters.initial_chest is None:
-            h_hat = None
-
+        """
+        Use manual LS-based channel estimation.
+        """
+        # Call the manual channel estimator
+        h_hat = self._manual_channel_estimator.estimate_channel(y, num_tx)
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
@@ -1017,13 +1028,16 @@ class NeuralPUSCHReceiver(nn.Module):
             print("bits: ", bits)
             num_tx = active_tx.shape[1]
             print("num_tx: ", num_tx, type(num_tx))
+
+            # Call manual channel estimation
             h_hat = self.estimate_channel(y, num_tx)
             print("h_hat: ", h_hat, type(h_hat))
-            if h is not None:
 
+            if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
                 print("h: ", h, type(h))
 
+            # Pass inputs to the neural receiver model
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
@@ -1035,14 +1049,20 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             print("num_tx: ", num_tx, type(num_tx))
+
+            # Call manual channel estimation for evaluation
             h_hat = self.estimate_channel(y, num_tx)
             print("h_hat: ", h_hat, type(h_hat))
+
+            # Perform LLR and channel refinement
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
             print("llr: ", llr, type(llr))
+
+            # Decode the received bits
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
