@@ -369,6 +369,8 @@ class E2E_Model(nn.Module):
 
         for idx in range(len(mcs_arr_eval)):
             tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
+            print(f"TB Size for MCS index {mcs_arr_eval[idx]}: {tb_size}")
+
             if tb_size is None:
                 raise ValueError(
                     f"TB Size for MCS index {mcs_arr_eval[idx]} is None. Check transmitter initialization."
