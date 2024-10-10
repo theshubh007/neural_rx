@@ -951,6 +951,10 @@ class NeuralPUSCHReceiver(nn.Module):
                 y_numpy, dtype=tf.complex64
             )  # Convert to TensorFlow tensor
 
+            # Debug: Print shape of `y_tf` and pilot indices
+            print("y_tf shape:", y_tf.shape)
+            print("num_tx:", num_tx)
+
             # Perform the channel estimation with TensorFlow
             h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
 
@@ -960,10 +964,16 @@ class NeuralPUSCHReceiver(nn.Module):
                 y.dtype
             )  # Convert back to PyTorch tensor
 
+            # Debug: Check dimensions of `h_hat` after estimation
+            print("h_hat shape before processing:", h_hat.shape)
+
             # Perform the necessary PyTorch operations on h_hat
             h_hat = h_hat[:, 0, :, :num_tx, 0]
             h_hat = h_hat.permute(0, 2, 4, 3, 1)
             h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
+
+            # Debug: Check final shape of `h_hat`
+            print("h_hat shape after processing:", h_hat.shape)
 
         elif self._sys_parameters.initial_chest is None:
             h_hat = None
