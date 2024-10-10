@@ -1029,7 +1029,8 @@ class NeuralPUSCHReceiver(nn.Module):
         print("num_tx", num_tx)
         import tensorflow as tf
 
-        if self._sys_parameters.initial_chest == "ls":
+        print(self._sys_parameters.initial_chest)
+        if self._sys_parameters.initial_chest == None:
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
@@ -1061,9 +1062,6 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Return both channel estimates and error variance
             return h_hat, err_var
-
-        elif self._sys_parameters.initial_chest is None:
-            return None, None
 
     def preprocess_channel_ground_truth(self, h):
         # h: [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols, num_effective_subcarriers]
