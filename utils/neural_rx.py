@@ -1093,7 +1093,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
         return h
 
-    def forward(self, no, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+    def forward(self, inputs, no, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         """
         Apply neural receiver.
         """
