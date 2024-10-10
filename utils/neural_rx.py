@@ -1136,7 +1136,9 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
             print("Flag1")
-            h_hat = self.estimate_channel(y, num_tx, no)
+            h_hat, err_var = self.estimate_channel(y, num_tx, no)
+
+            # Now you can access h_hat.shape safely
             print(h_hat.shape, h_hat)
 
             # Call the neural receiver and get llr and h_hat_refined
