@@ -483,7 +483,7 @@ class E2E_Model(nn.Module):
             # Other channel types: pass only x
             print("flag2.4")
             print(dir(self._channel))
-            print(self._channel)
+            print(self._sys_parameters.channel_type)
 
             y, h = self._channel(
                 [x, no]
