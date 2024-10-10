@@ -989,15 +989,21 @@ class NeuralPUSCHReceiver(nn.Module):
                 self._tb_encoders[mcs_arr_eval[idx]](b[idx])
                 for idx in range(len(mcs_arr_eval))
             ]
+            print("flag1")
             print("bits: ", bits)
             num_tx = active_tx.shape[1]
+            print("num_tx: ", num_tx, type(num_tx))
             h_hat = self.estimate_channel(y, num_tx)
+            print("h_hat: ", h_hat, type(h_hat))
             if h is not None:
+
                 h = self.preprocess_channel_ground_truth(h)
+                print("h: ", h, type(h))
 
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
+            print("losses: ", losses, type(losses))
             return losses
 
         else:
