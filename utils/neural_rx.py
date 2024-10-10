@@ -128,6 +128,7 @@ class AggregateUserStates(nn.Module):
 
         # Ensure in_features is passed as an integer
         if not isinstance(in_features, int):
+            print(f"in_features: {in_features}")
             raise TypeError(f"in_features must be an int but got {type(in_features)}")
 
         # Initialize hidden layers with both in_features and out_features
