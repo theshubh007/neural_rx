@@ -32,7 +32,7 @@ from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
 class SeparableConv2d(nn.Module):
-  
+
     def __init__(self, in_channels, out_channels, kernel_size, bias=False):
         super(SeparableConv2d, self).__init__()
         self.depthwise = nn.Conv2d(
@@ -181,7 +181,7 @@ class StateInit(nn.Module):
         for conv in self._hidden_conv:
             z = conv(z)
         z = self._output_conv(z)
-        
+
         print("flag7")
         s0 = split_dim(z, [batch_size, num_tx], 0)
 
@@ -387,6 +387,7 @@ class CGNN(nn.Module):
         dtype=torch.float32,
     ):
         super().__init__()
+        print("Init: CGNN")
 
         self._training = training
         self._apply_multiloss = apply_multiloss
@@ -421,6 +422,7 @@ class CGNN(nn.Module):
         self._num_it = num_it
 
         # Readouts
+        print("flag1")
         if self._var_mcs_masking:
             self._readout_llrs = nn.ModuleList(
                 [
@@ -531,6 +533,7 @@ class CGNNOFDM(nn.Module):
         nrx_dtype=torch.float32,
     ):
         super().__init__()
+        print("Init: CGNNOFDM")
 
         self._training = training
         self._max_num_tx = max_num_tx
@@ -556,6 +559,7 @@ class CGNNOFDM(nn.Module):
             pass
 
         # all UEs in the same pusch config must use the same MCS
+        print("flag1")
         num_bits_per_symbol = []
         for mcs_list_idx in range(self._num_mcss_supported):
             num_bits_per_symbol.append(
@@ -563,11 +567,13 @@ class CGNNOFDM(nn.Module):
             )
 
         # Number of receive antennas
+        print("flag2")
         num_rx_ant = sys_parameters.num_rx_antennas
 
         ####################################################
         # Core neural receiver
         ####################################################
+        print("flag3")
         self._cgnn = CGNN(
             num_bits_per_symbol,  # is a list
             num_rx_ant,
@@ -590,11 +596,13 @@ class CGNNOFDM(nn.Module):
         # data-carrying resource elements from the
         # resource grid
         ###################################################
+        print("flag4")
         self._rg_demapper = ResourceGridDemapper(self._rg, sys_parameters.sm)
 
         #################################################
         # Instantiate the loss function if training
         #################################################
+        print("flag5")
         if training:
             # Loss function
             self._bce = nn.BCEWithLogitsLoss(reduction="none")
@@ -631,6 +639,7 @@ class CGNNOFDM(nn.Module):
 
         # Distance to the nearest pilot in time
         # Initialized with zeros and then filled.
+        print("flag6")
         pilots_dist_time = np.zeros(
             [
                 max_num_tx,
@@ -652,6 +661,7 @@ class CGNNOFDM(nn.Module):
 
         t_ind = np.arange(self._rg.num_ofdm_symbols)
         f_ind = np.arange(self._rg.fft_size)
+        print("flag7")
 
         for tx_ind in range(max_num_tx):
             for i, p_ind in enumerate(pilot_ind_sorted[tx_ind]):
