@@ -1134,6 +1134,7 @@ class NeuralPUSCHReceiver(nn.Module):
             # In evaluation, we expect only 2 inputs
             print("NeuralPUSCHReceiver forward else")
             y, active_tx = inputs
+            num_tx = active_tx.shape[1]
             print("Flag1")
             h_hat = self.estimate_channel(y, num_tx, no)
             print(h_hat.shape, h_hat)
