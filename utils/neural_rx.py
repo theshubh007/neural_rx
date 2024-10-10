@@ -774,9 +774,10 @@ class NeuralPUSCHReceiver(nn.Module):
             interpolation_type="nn",
         )
 
-        rg_type = rg.build_type_grid()[:, 0]
-        pilot_ind = torch.where(rg_type == 1)
-        self._pilot_ind = pilot_ind.numpy()
+        rg_type = rg.build_type_grid()[:, 0].numpy()
+        rg_type_torch = torch.tensor(rg_type)
+        pilot_ind = torch.where(rg_type_torch == 1)
+        self._pilot_ind = pilot_ind[0].numpy()
 
         self._layer_demappers = []
         for mcs_list_idx in range(self._num_mcss_supported):
