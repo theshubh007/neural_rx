@@ -550,12 +550,29 @@ class E2E_Model(nn.Module):
                         else h
                     )
 
-                    # Calling the receiver during evaluation phase with the updated tensors
-                    b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
+                    # Call the receiver during the evaluation phase
+                    receiver_output = self._receiver(
                         (y_torch, active_dmrs_torch),
                         mcs_arr_eval,
                         mcs_ue_mask_eval=mcs_ue_mask,
                     )
+
+                    # Calling the receiver during evaluation phase with the updated tensors
+                    # Check how many values are returned by the receiver
+                    if len(receiver_output) == 2:
+                        b_hat, h_hat_refined = receiver_output
+                        h_hat, tb_crc_status = (
+                            None,
+                            None,
+                        )  # Assign default None for the missing values
+                    elif len(receiver_output) == 4:
+                        b_hat, h_hat_refined, h_hat, tb_crc_status = receiver_output
+                    else:
+                        raise ValueError(
+                            f"Unexpected number of values returned from _receiver: {len(receiver_output)}"
+                        )
+
+                    print("Evaluation successful.")
 
                     print("Evaluation successful.")
 
