@@ -434,50 +434,40 @@ class E2E_Model(nn.Module):
             print("flag2.1")
             tx = self._sys_parameters.transmitters[0]
 
-            # Assuming num_pilot_symbols and num_resource_elements are scalar values
-            num_pilots = (
-                tx._resource_grid.num_pilot_symbols
-            )  # Keep them as scalar values
-            # Check if num_pilots and num_res are not already in NumPy format
+            # Convert num_pilots and num_res to NumPy arrays if needed
+            num_pilots = tx._resource_grid.num_pilot_symbols
+            num_res = tx._resource_grid.num_resource_elements
+
+            # Convert integers to NumPy arrays for PyTorch compatibility
             if isinstance(num_pilots, int):
-                num_pilots = np.array(
-                    num_pilots, dtype=np.float32
-                )  # Convert integer to NumPy array
-            else:
-                num_pilots = to_numpy(
-                    num_pilots
-                )  # Use to_numpy for other types like tensors
-            num_res = (
-                tx._resource_grid.num_resource_elements
-            )  # Keep them as scalar values
+                num_pilots = np.array(num_pilots, dtype=np.float32)
             if isinstance(num_res, int):
-                num_res = np.array(
-                    num_res, dtype=np.float32
-                )  # Convert integer to NumPy array
-            else:
-                num_res = to_numpy(num_res)  # Use to_numpy for other types like tensors
+                num_res = np.array(num_res, dtype=np.float32)
 
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
-            print(type(num_pilots))
-            print(type(num_res))
-            # Now convert them back to PyTorch tensors for the PyTorch operation
-            num_pilots = torch.tensor(
-                num_pilots, dtype=torch.float32
-            )  # Convert to PyTorch tensor
-            num_res = torch.tensor(
-                num_res, dtype=torch.float32
-            )  # Convert to PyTorch tensor
+
+            # Convert them back to PyTorch tensors
+            num_pilots = torch.tensor(num_pilots, dtype=torch.float32)
+            num_res = torch.tensor(num_res, dtype=torch.float32)
 
             # Perform the PyTorch operation for adjusting ebno_db
             ebno_db = ebno_db - 10.0 * torch.log10(1.0 - num_pilots / num_res)
 
+            # Ensure mcs_arr_eval_idx is treated correctly
+            if isinstance(mcs_arr_eval_idx, int):  # If it's an integer
+                mcs_idx = mcs_arr_eval_idx
+            elif isinstance(mcs_arr_eval_idx, (list, tuple)):  # If it's a list or tuple
+                mcs_idx = mcs_arr_eval_idx[0]
+            else:
+                raise TypeError(
+                    "mcs_arr_eval_idx should be either an int or a list/tuple"
+                )
+
             # Manually perform ebnodb2no logic
             ebno = torch.pow(10.0, ebno_db / 10.0)
-            num_bits_per_symbol = self._transmitters[
-                mcs_arr_eval_idx[0]
-            ]._num_bits_per_symbol
-            coderate = self._transmitters[mcs_arr_eval_idx[0]]._target_coderate
+            num_bits_per_symbol = self._transmitters[mcs_idx]._num_bits_per_symbol
+            coderate = self._transmitters[mcs_idx]._target_coderate
             energy_per_symbol = 1
             print(f"Energy per symbol: {energy_per_symbol}")
             no = 1 / (ebno * coderate * num_bits_per_symbol / energy_per_symbol)
