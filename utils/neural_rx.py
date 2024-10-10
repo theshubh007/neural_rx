@@ -364,14 +364,26 @@ class CGNN(nn.Module):
         # Initialization for the state
         if self._var_mcs_masking:
             self._s_init = [
-                StateInit(d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype)
+                StateInit(
+                    d_s,
+                    num_units_init,
+                    in_channels,
+                    layer_type=layer_type_conv,
+                    dtype=dtype,
+                )
             ]
         else:
-            self._s_init = []
+            self._s_init = (
+                nn.ModuleList()
+            )  # Use ModuleList for multiple initializations
             for _ in num_bits_per_symbol:
                 self._s_init.append(
                     StateInit(
-                        d_s, num_units_init, layer_type=layer_type_conv, dtype=dtype
+                        d_s,
+                        num_units_init,
+                        in_channels,
+                        layer_type=layer_type_conv,
+                        dtype=dtype,
                     )
                 )
 
