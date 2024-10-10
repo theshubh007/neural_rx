@@ -45,7 +45,7 @@ class StateInit(nn.Module):
         in_channels,
         layer_type="sepconv",
         dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -117,9 +117,9 @@ class AggregateUserStates(nn.Module):
         in_features,
         layer_type="dense",
         dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
-        print("AggregateUserStates")
+        print("AggregateUserStates initialized")
         super().__init__()
 
         if layer_type == "dense":
@@ -131,7 +131,18 @@ class AggregateUserStates(nn.Module):
         self._hidden_layers = nn.ModuleList()
         print("flag0")
         for n in num_units:
-            print("n: ", n)
+            # Print the types of in_features and n to debug
+            print(f"in_features: {in_features}, type: {type(in_features)}")
+            print(f"n: {n}, type: {type(n)}")
+
+            # Check if in_features and n are integers
+            if not isinstance(in_features, int):
+                raise TypeError(
+                    f"in_features must be an int but got {type(in_features)}"
+                )
+            if not isinstance(n, int):
+                raise TypeError(f"n (out_features) must be an int but got {type(n)}")
+
             self._hidden_layers.append(layer(in_features, n))
             in_features = n  # Update in_features for the next layer
 
@@ -247,7 +258,7 @@ class CGNNIt(nn.Module):
         layer_type_dense="dense",
         layer_type_conv="sepconv",
         dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -289,7 +300,7 @@ class ReadoutLLRs(nn.Module):
         num_units,
         layer_type="dense",
         dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -372,7 +383,7 @@ class CGNN(nn.Module):
         apply_multiloss=False,
         var_mcs_masking=False,
         dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -554,7 +565,7 @@ class CGNNOFDM(nn.Module):
         layer_type_conv="sepconv",
         layer_type_readout="dense",
         nrx_dtype=torch.float32,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -991,7 +1002,7 @@ class NRPreprocessing(nn.Module):
             -1,
             *outputs.shape[1:3],
             num_prbs * self._num_res_per_prb,
-            *outputs.shape[5:]
+            *outputs.shape[5:],
         )
         outputs = outputs.permute(torch.roll(torch.arange(outputs.dim()), shifts=3))
 
@@ -1034,7 +1045,7 @@ class NeuralReceiverONNX(nn.Module):
         nrx_dtype,
         num_tx,
         num_rx_ant,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
