@@ -1016,7 +1016,13 @@ class NeuralPUSCHReceiver(nn.Module):
             dtype=sys_parameters.nrx_dtype,
         )
 
-    def estimate_channel(self, y, num_tx):
+    def estimate_channel(self, y, num_tx, no):
+        """
+        Estimate channel using the LS method.
+        y has shape [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
+        num_tx is the number of transmitters.
+        no is the noise variance.
+        """
 
         print("NeuralPUSCHReceiver estimate_channel")
         print("y", y.shape)
@@ -1028,27 +1034,35 @@ class NeuralPUSCHReceiver(nn.Module):
                     "Cannot use initial channel estimator if pilots are masked."
                 )
 
-            # Dummy value for N0 as it is not used anyway.
-            import tensorflow as tf
+            # Convert PyTorch tensor `y` to NumPy for TensorFlow compatibility
+            y_numpy = y.cpu().numpy()  # Assuming `y` is a PyTorch tensor
+            no_numpy = (
+                no.cpu().numpy() if isinstance(no, torch.Tensor) else no
+            )  # Handle `no`
 
-            y_numpy = to_numpy(y)
+            # Convert NumPy arrays to TensorFlow tensors
             y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
+            no_tf = tf.convert_to_tensor(no_numpy, dtype=tf.float32)
+
             # Call the TensorFlow LS estimator
-            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
-            # h_hat, _ = self._ls_est([y, 1e-1])
-            h_hat_numpy = to_numpy(h_hat_tf)
+            try:
+                h_hat_tf, err_var_tf = self._ls_est([y_tf, no_tf])
+            except tf.errors.InvalidArgumentError as e:
+                print(f"TensorFlow LSChannelEstimator error: {e}")
+                return None, None  # Handle the error appropriately
+
+            # Convert TensorFlow outputs back to NumPy and then PyTorch tensors
+            h_hat_numpy = h_hat_tf.numpy()
             h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
 
-            # Reshaping to the expected shape
-            # h_hat shape: [batch_size, num_tx, num_effective_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-            h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([torch.real(h_hat), torch.imag(h_hat)], dim=-1)
+            err_var_numpy = err_var_tf.numpy()
+            err_var = torch.from_numpy(err_var_numpy).to(y.device)
+
+            # Return both channel estimates and error variance
+            return h_hat, err_var
 
         elif self._sys_parameters.initial_chest is None:
-            h_hat = None
-
-        return h_hat
+            return None, None
 
     def preprocess_channel_ground_truth(self, h):
         # h: [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols, num_effective_subcarriers]
