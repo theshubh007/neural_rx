@@ -333,7 +333,13 @@ class ReadoutChEst(nn.Module):
     """
 
     def __init__(
-        self, num_rx_ant, num_units, layer_type="dense", dtype=torch.float32, **kwargs
+        self,
+        num_rx_ant,
+        num_units,
+        in_features,
+        layer_type="dense",
+        dtype=torch.float32,
+        **kwargs,
     ):
         super().__init__()
 
@@ -343,18 +349,26 @@ class ReadoutChEst(nn.Module):
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden layers
-        self._hidden_layers = nn.ModuleList([layer(n, dtype=dtype) for n in num_units])
-        self._output_layer = layer(2 * num_rx_ant, dtype=dtype)
+        self._hidden_layers = nn.ModuleList()
+        for n in num_units:
+            self._hidden_layers.append(
+                layer(in_features, n)
+            )  # Pass in_features and out_features
+            in_features = n  # Update in_features for the next layer
+
+        # Output layer
+        self._output_layer = layer(
+            in_features, 2 * num_rx_ant
+        )  # Output size is `2 * num_rx_ant`
 
     def forward(self, s):
-        # Input of the MLP
+        # Apply the MLP layers
         z = s
-        # Apply MLP
         for layer in self._hidden_layers:
             z = F.relu(layer(z))
         h_hat = self._output_layer(z)
 
-        return h_hat  # Channel estimate
+        return h_hat
 
 
 class CGNN(nn.Module):
