@@ -31,49 +31,24 @@ from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
-# class SeparableConv2d(nn.Module):
-
-#     def __init__(self, in_channels, out_channels, kernel_size, bias=False):
-#         super(SeparableConv2d, self).__init__()
-#         self.depthwise = nn.Conv2d(
-#             in_channels,
-#             in_channels,
-#             kernel_size=kernel_size,
-#             groups=in_channels,
-#             bias=bias,
-#             padding=kernel_size // 2,
-#         )
-#         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
-
-#     def forward(self, x):
-#         x = self.depthwise(x)
-#         x = self.pointwise(x)
-#         return x
-
-
 class SeparableConv2d(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, bias=False):
         super(SeparableConv2d, self).__init__()
-
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-
-        padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-
         self.depthwise = nn.Conv2d(
             in_channels,
             in_channels,
             kernel_size=kernel_size,
             groups=in_channels,
             bias=bias,
-            padding=padding,
+            padding=kernel_size // 2,
         )
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
     def forward(self, x):
-        out = self.depthwise(x)
-        out = self.pointwise(out)
-        return out
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        return x
 
 
 def to_numpy(input_array):
@@ -278,7 +253,7 @@ class UpdateState(nn.Module):
 
         # Output block
         self._output_conv = layer(
-            in_channels=None, out_channels=d_s, kernel_size=(3, 3), padding=1
+            in_channels=None, out_channels=d_s, kernel_size=3, padding=1
         )
 
     def forward(self, inputs):
