@@ -474,24 +474,22 @@ class E2E_Model(nn.Module):
         print(f"Noise Power Density (no): {no}")
         print("flag2.2")
 
-        if (
-            self._sys_parameters.channel_type == "AWGN"
-            
-        ):
+        if self._sys_parameters.channel_type == "AWGN":
             # AWGN channel: pass both x and no
             print("flag2.3")
 
             y = self._channel([x, no])
             h = torch.ones_like(y)  # Simple AWGN channel with no channel response
         else:
-            # Other channel types: pass only x
-            print("flag2.4")
-            print(dir(self._channel))
-            print(self._sys_parameters.channel_type)
+            # # Other channel types: pass only x
+            # print("flag2.4")
+            # print(dir(self._channel))
+            # print(self._sys_parameters.channel_type)
 
-            y, h = self._channel(
-                [x, no]
-            )  # Pass both x and no even for non-AWGN channels
+            # y, h = self._channel(
+            #     [x, no]
+            # )  # Pass both x and no even for non-AWGN channels
+            pass
 
         ###################################
         # Receiver
