@@ -662,21 +662,32 @@ class CGNNOFDM(nn.Module):
         # to the nearest pilot in time and frequency.
         ##############################################
         rg_type = self._rg.build_type_grid()[:, 0].numpy()  # One stream only
+        print(f"Shape of rg_type: {rg_type.shape}")
         rg_type_torch = torch.tensor(rg_type)  # Convert to PyTorch tensor
+        print(f"Shape of rg_type_torch: {rg_type_torch.shape}")
         pilot_ind = torch.where(rg_type_torch == 1)
+        print(f"Shape of pilot_ind: {pilot_ind[0].shape}")
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
+        # Convert to PyTorch and flatten for dimension compatibility
         pilots_torch = torch.tensor(pilots, dtype=torch.float32)
 
-        # Initialize the pilots_only tensor
+        # Ensure that the pilots_only tensor matches the shape of the resource grid
         pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
 
         # Make sure pilot_ind[0] has the correct shape for scatter
         if pilot_ind[0].dim() == 1:
-            pilot_ind_reshaped = pilot_ind[0].unsqueeze(1).expand(-1, 1)
-        else:
-            pilot_ind_reshaped = pilot_ind[0]
+            pilot_ind_reshaped = (
+                pilot_ind[0].unsqueeze(1).expand(-1, 2)
+            )  # Adjust to match pilots_only shape
+
+        # Scatter pilots into the correct locations in pilots_only
+        for i, p_ind in enumerate(pilot_ind_reshaped):
+            if p_ind[0] < pilots_only.shape[0] and p_ind[1] < pilots_only.shape[1]:
+                pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
+            else:
+                print(f"Skipping out-of-bounds index: {p_ind}")
 
         pilot_ind_reshaped = pilot_ind[0].view(
             -1, 2
