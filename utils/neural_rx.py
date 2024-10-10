@@ -383,7 +383,8 @@ class CGNN(nn.Module):
         **kwargs,
     ):
         super().__init__()
-
+        # Readouts
+        in_features = d_s  # `d_s` should be the input feature size to the readout
         self._training = training
         self._apply_multiloss = apply_multiloss
         self._var_mcs_masking = var_mcs_masking
@@ -434,11 +435,14 @@ class CGNN(nn.Module):
         self._num_it = num_it
 
         # Readouts
+        in_features = d_s  # `d_s` should be the input feature size to the readout
+
         if self._var_mcs_masking:
             self._readout_llrs = [
                 ReadoutLLRs(
                     max(num_bits_per_symbol),
                     num_units_readout,
+                    in_features,  # Pass `in_features`
                     layer_type=layer_type_readout,
                     dtype=dtype,
                 )
@@ -450,6 +454,7 @@ class CGNN(nn.Module):
                     ReadoutLLRs(
                         num_bits,
                         num_units_readout,
+                        in_features,  # Pass `in_features`
                         layer_type=layer_type_readout,
                         dtype=dtype,
                     )
