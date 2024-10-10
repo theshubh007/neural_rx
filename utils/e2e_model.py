@@ -382,29 +382,30 @@ class E2E_Model(nn.Module):
         # Combine transmit signals from all MCSs
         x = torch.zeros_like(b[0], dtype=torch.complex64)
         for idx in range(len(mcs_arr_eval)):
-            print("Flag1.0")
             _mcs_ue_mask = (
                 mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).expand_as(x)
             )
 
-            # Print shapes to debug
-            print("Flag1.2.1")
-            print(f"Shape of b[idx]: {b[idx].shape}")
-            print(f"Shape of _mcs_ue_mask: {_mcs_ue_mask.shape}")
+            # Debugging: Check if the transmitter is callable and print its type
             print(
-                f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {self._transmitters[mcs_arr_eval[idx]](b[idx]).shape}"
+                f"Type of transmitter {idx}: {type(self._transmitters[mcs_arr_eval[idx]])}"
             )
-            print("Flag1.2.2")
 
-            # Ensure compatibility with PyTorch by adjusting the tensor size appropriately
-            # You might need to replace TensorFlow's TBEncoder calls here with PyTorch equivalents
-            # E.g., converting tensor shapes or broadcasting using PyTorch methods
+            # Debugging: Check shape of input
+            print(f"Shape of b[idx]: {b[idx].shape}")
 
-            # Add transmitter output to x with proper broadcasting
-            print(f"Adding transmitter output for MCS {mcs_arr_eval[idx]} to x")
-            print(f"Shape of x: {x.shape}")
-            print(f"Shape of _mcs_ue_mask: {_mcs_ue_mask.shape}")
-            x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
+            try:
+                # Check if the transmitter can be called and its output shape
+                output = self._transmitters[mcs_arr_eval[idx]](b[idx])
+                print(
+                    f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {output.shape}"
+                )
+
+                # Proceed if everything works
+                x += _mcs_ue_mask * output
+
+            except Exception as e:
+                print(f"Error calling transmitter: {e}")
             print("Flag1.2.3")
 
         # Mask non-active DMRS ports by multiplying with 0
