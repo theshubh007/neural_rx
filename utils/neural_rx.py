@@ -661,10 +661,17 @@ class CGNNOFDM(nn.Module):
         # Positional encoding consists in the distance
         # to the nearest pilot in time and frequency.
         ##############################################
-        rg_type = self._rg.build_type_grid()[:, 0]  # One stream only
-        pilot_ind = torch.where(rg_type == 1)
-        pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3)
-        pilots_only = torch.zeros(rg_type.shape).scatter_(0, pilot_ind, pilots)
+        rg_type = self._rg.build_type_grid()[:, 0].numpy()  # One stream only
+        rg_type_torch = torch.tensor(rg_type)  # Convert to PyTorch tensor
+        pilot_ind = torch.where(rg_type_torch == 1)
+        pilots = flatten_last_dims(
+            self._rg.pilot_pattern.pilots, 3
+        ).numpy()  # Ensure this is NumPy
+        pilots_torch = torch.tensor(pilots)  # Convert to PyTorch tensor
+
+        pilots_only = torch.zeros(rg_type_torch.shape).scatter_(
+            0, pilot_ind[0], pilots_torch
+        )  # Use pilot_ind[0]
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
 
         # Sort the pilots according to which TX they are allocated
