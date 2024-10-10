@@ -243,8 +243,8 @@ class Parameters:
                     bs_array=bs_array,
                     ut_array=ut_array,
                     direction="uplink",
-                    enable_pathloss=False,
-                    enable_shadow_fading=False,
+                    enable_pathloss=True,  # Enable path loss
+                    enable_shadow_fading=True,  # Enable shadow fading
                 )
             else:  # UMa
                 self.channel_model = UMa(
@@ -253,8 +253,8 @@ class Parameters:
                     bs_array=bs_array,
                     ut_array=ut_array,
                     direction="uplink",
-                    enable_pathloss=False,
-                    enable_shadow_fading=False,
+                    enable_pathloss=True,  # Enable path loss
+                    enable_shadow_fading=True,  # Enable shadow fading
                 )
 
             self.channel = OFDMChannel(
