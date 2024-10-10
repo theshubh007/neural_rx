@@ -401,6 +401,9 @@ class E2E_Model(nn.Module):
             # E.g., converting tensor shapes or broadcasting using PyTorch methods
 
             # Add transmitter output to x with proper broadcasting
+            print(f"Adding transmitter output for MCS {mcs_arr_eval[idx]} to x")
+            print(f"Shape of x: {x.shape}")
+            print(f"Shape of _mcs_ue_mask: {_mcs_ue_mask.shape}")
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
             print("Flag1.2.3")
 
