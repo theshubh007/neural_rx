@@ -523,6 +523,14 @@ class E2E_Model(nn.Module):
             else:
                 # Return the results during evaluation phase
                 print("flag3.1.2")
+                print(
+                    type(y),
+                    type(active_dmrs),
+                    type(b),
+                    type(h),
+                    type(mcs_ue_mask),
+                    type(mcs_arr_eval),
+                )
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
                     (y, active_dmrs), mcs_arr_eval, mcs_ue_mask_eval=mcs_ue_mask
                 )
