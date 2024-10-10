@@ -379,6 +379,8 @@ class E2E_Model(nn.Module):
             self._set_transmitter_random_pilots()
 
         print("flag1.2")
+        import tensorflow as tf
+
         # Combine transmit signals from all MCSs
         x = torch.zeros_like(b[0], dtype=torch.complex64)
         for idx in range(len(mcs_arr_eval)):
@@ -395,12 +397,17 @@ class E2E_Model(nn.Module):
             print(f"Shape of b[idx]: {b[idx].shape}")
 
             try:
-                # Check if the transmitter can be called and its output shape
-                output_tf = self._transmitters[mcs_arr_eval[idx]](b[idx])
+
+                # Convert PyTorch tensor to NumPy, then to TensorFlow tensor
+                input_np = b[idx].cpu().numpy()
+                input_tf = tf.convert_to_tensor(input_np)
+
+                # Call the TensorFlow transmitter
+                output_tf = self._transmitters[mcs_arr_eval[idx]](input_tf)
 
                 # Convert TensorFlow tensor to NumPy and then to PyTorch tensor
                 output_np = output_tf.numpy()
-                output_torch = torch.from_numpy(output_np)
+                output_torch = torch.from_numpy(output_np).to(b[idx].device)
 
                 print(
                     f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {output_torch.shape}"
