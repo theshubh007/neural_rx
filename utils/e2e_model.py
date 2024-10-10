@@ -434,10 +434,13 @@ class E2E_Model(nn.Module):
             print("flag2.1")
             tx = self._sys_parameters.transmitters[0]
             # Assuming they are already integers
-            num_pilots = tx._resource_grid.num_pilot_symbols  # Directly use the integer
-            num_res = (
+            # Convert num_pilots and num_res to PyTorch tensors
+            num_pilots = torch.tensor(
+                tx._resource_grid.num_pilot_symbols
+            )  # Convert to PyTorch tensor
+            num_res = torch.tensor(
                 tx._resource_grid.num_resource_elements
-            )  # Directly use the integer
+            )  # Convert to PyTorch tensor
 
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
