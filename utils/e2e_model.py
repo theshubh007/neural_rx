@@ -414,10 +414,7 @@ class E2E_Model(nn.Module):
                 )
 
                 # Proceed if everything works
-                b_sliced = b[idx][..., :48]  # Adjust the slicing to match your needs
-
-                # Now perform the operation
-                x += _mcs_ue_mask * b_sliced
+                x += _mcs_ue_mask * output_torch
 
             except Exception as e:
                 print(f"Error calling transmitter: {e}")
