@@ -402,6 +402,7 @@ class E2E_Model(nn.Module):
 
             # Add transmitter output to x with proper broadcasting
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
+            print("Flag1.2.3")
 
         # Mask non-active DMRS ports by multiplying with 0
         print("flag1.3")
