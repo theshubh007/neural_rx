@@ -297,11 +297,11 @@ class E2E_Model(nn.Module):
 
     def _set_transmitter_random_pilots(self):
         """
-        Sample a random slot number and assigns its pilots to the transmitter
+        Sample a random slot number and assign its pilots to the transmitter
         """
         pilot_set = self._sys_parameters.pilots
-        num_pilots = pilot_set.shape[0]
-        random_pilot_ind = torch.randint(0, num_pilots, (1,)).item()
+        num_pilots = pilot_set.size(0)
+        random_pilot_ind = torch.randint(0, num_pilots, (1,))
         pilots = pilot_set[random_pilot_ind]
         for mcs_list_idx in range(len(self._sys_parameters.mcs_index)):
             self._transmitters[mcs_list_idx].pilot_pattern.pilots = pilots
@@ -318,7 +318,7 @@ class E2E_Model(nn.Module):
     ):
         """Defines end-to-end system model."""
 
-        # Randomly sample num_tx active dmrs ports
+        # Randomly sample num_tx active DMRS ports
         if num_tx is None:
             num_tx = self._sys_parameters.max_num_tx
 
@@ -326,34 +326,36 @@ class E2E_Model(nn.Module):
         if mcs_arr_eval_idx is None:
             mcs_arr_eval_idx = self._mcs_arr_eval_idx
 
-        # Generate active dmrs mask (if not specified)
+        # Generate active DMRS mask (if not specified)
         if active_dmrs is None:
             active_dmrs = self._active_dmrs_mask(
                 batch_size, num_tx, self._sys_parameters.max_num_tx
             )
 
-        # Initialize mcs_ue_mask
         if mcs_ue_mask is None:
-            # Pre-specified MCS
-            if isinstance(mcs_arr_eval_idx, int):
-                mcs_ue_mask = (
-                    torch.nn.functional.one_hot(
-                        torch.tensor([mcs_arr_eval_idx]),
-                        num_classes=len(self._sys_parameters.mcs_index),
-                    )
-                    .expand(batch_size, self._sys_parameters.max_num_tx, -1)
-                    .float()
+            # No MCS-to-UE-mask specified --> evaluate pre-specified MCS only
+            assert isinstance(
+                mcs_arr_eval_idx, int
+            ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
+            mcs_ue_mask = (
+                torch.nn.functional.one_hot(
+                    torch.tensor(mcs_arr_eval_idx),
+                    num_classes=len(self._sys_parameters.mcs_index),
                 )
-                mcs_arr_eval = [mcs_arr_eval_idx]
-            else:
-                raise ValueError(
-                    "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer."
-                )
+                .unsqueeze(0)
+                .repeat(batch_size, self._sys_parameters.max_num_tx, 1)
+            )
+            mcs_arr_eval = [mcs_arr_eval_idx]
         else:
-            # Process all MCSs
+            # MCS_UE_mask is not none --> we now need to process all MCSs
             if isinstance(mcs_arr_eval_idx, (list, tuple)):
+                # Some different order specified. Useful to evaluate mixed MCS scenarios.
+                assert len(mcs_arr_eval_idx) == len(
+                    self._sys_parameters.mcs_index
+                ), "MCS array size mismatch."
                 mcs_arr_eval = mcs_arr_eval_idx
             else:
+                # Process in order of MCS index array
                 mcs_arr_eval = list(range(len(self._sys_parameters.mcs_index)))
 
         ###################################
@@ -363,19 +365,9 @@ class E2E_Model(nn.Module):
 
         b = []
         for idx in range(len(mcs_arr_eval)):
-            tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
-            if tb_size is None:
-                raise ValueError(f"TB Size for MCS index {mcs_arr_eval[idx]} is None.")
+            tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size
             b.append(
-                self._source(
-                    torch.Size(
-                        [
-                            batch_size,
-                            self._sys_parameters.max_num_tx,
-                            tb_size,
-                        ]
-                    )
-                )
+                torch.zeros([batch_size, self._sys_parameters.max_num_tx, tb_size])
             )
 
         # Sample a random slot number and assign its pilots to the transmitter
