@@ -945,7 +945,7 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        """Channel estimation logic using TensorFlow for LS Estimation."""
+      """Channel estimation logic using TensorFlow for LS Estimation."""
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
@@ -967,6 +967,20 @@ class NeuralPUSCHReceiver(nn.Module):
             print(f"num_ofdm_symbols: {num_ofdm_symbols}")
             print(f"fft_size: {fft_size}")
             print(f"num_tx: {num_tx}")
+
+            # Calculate the expected number of elements
+            expected_elements = batch_size * 1 * num_rx_ant * num_ofdm_symbols * fft_size
+            actual_elements = y.numel()
+
+            # Debugging the number of elements
+            print(f"Expected number of elements: {expected_elements}")
+            print(f"Actual number of elements: {actual_elements}")
+
+            # Check if the number of elements match
+            if expected_elements != actual_elements:
+                raise ValueError(
+                    f"Mismatch in the number of elements: expected {expected_elements}, got {actual_elements}"
+                )
 
             # Convert PyTorch tensor `y` to TensorFlow tensor
             y_numpy = y.cpu().numpy()
@@ -996,7 +1010,6 @@ class NeuralPUSCHReceiver(nn.Module):
             h_hat = None
 
         return h_hat
-
     def preprocess_channel_ground_truth(self, h):
         h = h.squeeze(1)
         h = h.permute(0, 2, 5, 4, 1, 3)
