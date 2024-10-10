@@ -119,6 +119,7 @@ class AggregateUserStates(nn.Module):
         dtype=torch.float32,
         **kwargs
     ):
+        print("AggregateUserStates")
         super().__init__()
 
         if layer_type == "dense":
@@ -136,13 +137,16 @@ class AggregateUserStates(nn.Module):
         self._output_layer = layer(in_features, d_s)
 
     def forward(self, inputs):
+        print("AggregateUserStates forward")
         s, active_tx = inputs
 
         # Process s
         sp = s
+        print("flag1")
         for layer in self._hidden_layers:
             sp = F.relu(layer(sp))
         sp = self._output_layer(sp)
+        print("flag2")
 
         # Mask non-active users
         active_tx = active_tx.unsqueeze(-1).expand_as(sp)
@@ -158,6 +162,7 @@ class AggregateUserStates(nn.Module):
         # Avoid division by zero
         p = torch.where(p == 0.0, torch.tensor(1.0), 1.0 / p)
         a = a * p
+        print("flag3")
 
         return a
 
