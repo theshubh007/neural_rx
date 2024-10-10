@@ -1014,6 +1014,8 @@ class NeuralPUSCHReceiver(nn.Module):
 
     def estimate_channel(self, y, num_tx):
         # y has shape [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
+        print("NeuralPUSCHReceiver estimate_channel")
+        print(y.shape, y)
 
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
@@ -1102,11 +1104,16 @@ class NeuralPUSCHReceiver(nn.Module):
 
         else:
             # In evaluation, we expect only 2 inputs
+            print("NeuralPUSCHReceiver forward else")
             y, active_tx = inputs
+            print(y.shape, y)
+            print(active_tx.shape, active_tx)
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
+            print(num_tx)
             h_hat = self.estimate_channel(y, num_tx)
+            print(h_hat.shape, h_hat)
 
             # Call the neural receiver and get llr and h_hat_refined
             llr, h_hat_refined = self._neural_rx(
