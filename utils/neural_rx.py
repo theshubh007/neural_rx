@@ -1134,11 +1134,20 @@ class NeuralPUSCHReceiver(nn.Module):
             # In evaluation, we expect only 2 inputs
             print("NeuralPUSCHReceiver forward else")
             y, active_tx = inputs
-            print(y.shape, y)
-            print(active_tx.shape, active_tx)
 
-            # Initial channel estimation
+            # Ensure `active_tx` is not a scalar or improperly shaped tensor
+            print(f"y shape: {y.shape}")
+            print(f"active_tx shape: {active_tx.shape}")
+
+            # Check the rank (number of dimensions) of active_tx
+            if active_tx.dim() < 2:
+                raise ValueError(
+                    f"Expected `active_tx` to have at least 2 dimensions, but got shape {active_tx.shape}"
+                )
+
+            # Now safely access the second dimension (number of transmitters)
             num_tx = active_tx.shape[1]
+            print(f"Number of transmit antennas (num_tx): {num_tx}")
 
             print(f"Number of transmit antennas (num_tx): {num_tx}")
             h_hat = self.estimate_channel(y, num_tx, no)
