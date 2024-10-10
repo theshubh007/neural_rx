@@ -669,6 +669,7 @@ class CGNNOFDM(nn.Module):
         ).numpy()  # Ensure this is NumPy
         # Ensure pilots_torch has the same dtype as torch.zeros
         # Ensure pilots_torch has the same dtype as torch.zeros
+        # Ensure pilots_torch has the same dtype as torch.zeros
         pilots_torch = torch.tensor(
             pilots, dtype=torch.float32
         )  # Ensure it is a float tensor
@@ -676,16 +677,19 @@ class CGNNOFDM(nn.Module):
         # Ensure that torch.zeros has the same dtype as pilots_torch
         pilots_only = torch.zeros(rg_type_torch.shape, dtype=pilots_torch.dtype)
 
-        # Reshape pilot_ind to match the dimensions of pilots_only
-        # Assuming you want to scatter along the first dimension (axis 0)
-        # Make sure the index has the same number of dimensions as pilots_torch
-        pilot_ind_reshaped = pilot_ind[0].unsqueeze(
-            -1
-        )  # Add extra dimension if necessary
+        # Check dimensions before scatter
+        print(f"Shape of pilots_only: {pilots_only.shape}")
+        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
+
+        # Reshape the index tensor to match pilots_only
+        # Assuming pilots_only has more than 1 dimension, you need to expand the index tensor
+        pilot_ind_reshaped = pilot_ind[0].unsqueeze(1).expand_as(pilots_torch)
 
         # Use scatter_ with correctly shaped index tensor
         pilots_only = pilots_only.scatter_(0, pilot_ind_reshaped, pilots_torch)
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
+        print(f"Shape of pilots_only: {pilots_only.shape}")
+        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
 
         # Sort the pilots according to which TX they are allocated
         pilot_ind_sorted = [[] for _ in range(max_num_tx)]
