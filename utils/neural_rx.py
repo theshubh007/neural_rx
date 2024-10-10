@@ -663,26 +663,36 @@ class CGNNOFDM(nn.Module):
         ##############################################
         rg_type = self._rg.build_type_grid()[:, 0].numpy()  # One stream only
         print(f"Shape of rg_type: {rg_type.shape}")
-        print(f"rg_type: {rg_type}")
+        print(f"rg_type: {rg_type}")  # Check the full content
+
         rg_type_torch = torch.tensor(rg_type)  # Convert to PyTorch tensor
-        print(f"Shape of rg_type_torch: {rg_type_torch.shape}")
-        pilot_ind = torch.where(rg_type_torch == 1)
-        print(f"Shape of pilot_ind: {pilot_ind[0].shape}")
+        pilot_ind = torch.where(rg_type_torch == 1)  # Should give indices of pilots
+        print(f"Shape of pilot_ind: {pilot_ind[0].shape}")  # Debugging pilot indices
+
+        # If no pilots are found, manually inspect grid positions
+        if len(pilot_ind[0]) == 0:
+            print("No valid pilots found! Manually verifying pilot positions...")
+            # Manually check for 1s in rg_type_torch
+            for i in range(rg_type_torch.size(0)):
+                for j in range(rg_type_torch.size(1)):
+                    for k in range(rg_type_torch.size(2)):
+                        if rg_type_torch[i, j, k] == 1:
+                            print(f"Pilot found at index [{i}, {j}, {k}]")
+
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
-        print(f"Pilot pattern content: {pilots}")
-        # Convert to PyTorch and flatten for dimension compatibility
-        pilots_torch = torch.tensor(pilots, dtype=torch.float32)
+        pilots_torch = torch.tensor(
+            pilots, dtype=torch.float32
+        )  # Convert to PyTorch tensor
+        print(
+            f"Pilot pattern content: {pilots_torch.shape}"
+        )  # Validate the pilot pattern content
 
-        # Ensure that the pilots_only tensor matches the shape of the resource grid
+        # Initialize the pilots_only tensor
         pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
-        pilots_only = torch.zeros_like(rg_type_torch, dtype=torch.float32)
-        # Dummy example where we manually place pilots at position [0,0] and [1,1]
-        pilots_only[0, 0, 0] = 1.0
-        pilots_only[1, 1, 1] = 1.0
 
-        # Make sure pilot_ind[0] has the correct shape for scatter
+        # Manually check if pilots can be inserted into the grid
         if pilot_ind[0].dim() == 1:
             pilot_ind_reshaped = (
                 pilot_ind[0].unsqueeze(1).expand(-1, 2)
@@ -695,16 +705,10 @@ class CGNNOFDM(nn.Module):
             else:
                 print(f"Skipping out-of-bounds index: {p_ind}")
 
-        pilot_ind_reshaped = pilot_ind[0].view(
-            -1, 2
-        )  # Assuming a 2D pilot index (time, freq)
-
-        # Scatter pilots into the appropriate locations in pilots_only
-        for i, p_ind in enumerate(pilot_ind_reshaped):
-            if p_ind[0] < pilots_only.shape[0] and p_ind[1] < pilots_only.shape[1]:
-                pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
-            else:
-                print(f"Skipping out-of-bounds index: {p_ind}")
+        # Continue with the rest of your code
+        pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
+        print(f"Shape of pilots_only: {pilots_only.shape}")
+        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
 
         # Continue with the rest of your code
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
