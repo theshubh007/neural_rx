@@ -129,7 +129,9 @@ class AggregateUserStates(nn.Module):
 
         # Initialize hidden layers with both in_features and out_features
         self._hidden_layers = nn.ModuleList()
+        print("flag0")
         for n in num_units:
+            print("n: ", n)
             self._hidden_layers.append(layer(in_features, n))
             in_features = n  # Update in_features for the next layer
 
