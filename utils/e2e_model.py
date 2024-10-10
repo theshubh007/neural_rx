@@ -396,13 +396,18 @@ class E2E_Model(nn.Module):
 
             try:
                 # Check if the transmitter can be called and its output shape
-                output = self._transmitters[mcs_arr_eval[idx]](b[idx])
+                output_tf = self._transmitters[mcs_arr_eval[idx]](b[idx])
+
+                # Convert TensorFlow tensor to NumPy and then to PyTorch tensor
+                output_np = output_tf.numpy()
+                output_torch = torch.from_numpy(output_np)
+
                 print(
-                    f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {output.shape}"
+                    f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {output_torch.shape}"
                 )
 
                 # Proceed if everything works
-                x += _mcs_ue_mask * output
+                x += _mcs_ue_mask * output_torch
 
             except Exception as e:
                 print(f"Error calling transmitter: {e}")
