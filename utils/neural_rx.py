@@ -145,9 +145,7 @@ class StateInit(nn.Module):
         self._hidden_conv = nn.ModuleList()
         in_channels = 3  # Assuming input has 3 channels (y, pe, h_hat)
         for n in num_units:
-            conv = nn.Sequential(
-                layer(in_channels, n, kernel_size=3, padding=1), nn.ReLU()
-            )
+            conv = nn.Sequential(layer(in_channels, n, kernel_size=3), nn.ReLU())
             self._hidden_conv.append(conv)
             in_channels = n
 
