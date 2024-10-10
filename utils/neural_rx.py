@@ -1069,8 +1069,8 @@ class NeuralPUSCHReceiver(nn.Module):
         """
         self._training = False
         print("NeuralPUSCHReceiver forward")
-        print(self.training)
-        if self.training:
+        print(self._training)
+        if self._training:
             # In training mode, we expect 5 inputs
             y, active_tx, b, h, mcs_ue_mask = inputs
 
