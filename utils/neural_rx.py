@@ -765,6 +765,19 @@ class CGNNOFDM(nn.Module):
             return llrs[-1][0], h_hats[-1]
 
 
+class LayerDemapper(nn.Module):
+    def __init__(self, layer_mapper, num_bits_per_symbol):
+        super().__init__()
+        self.layer_mapper = layer_mapper
+        self.num_bits_per_symbol = num_bits_per_symbol
+
+    def forward(self, x):
+        # Implement the forward pass logic here
+        # This will depend on what the original LayerDemapper does
+        # You may need to port the TensorFlow implementation to PyTorch
+        pass
+
+
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False):
         super().__init__()
@@ -814,7 +827,16 @@ class NeuralPUSCHReceiver(nn.Module):
         pilot_ind = torch.where(rg_type == 1)
         self._pilot_ind = np.array(pilot_ind)
 
-        # Layer demappers
+        # # Layer demappers
+        # self._layer_demappers = nn.ModuleList(
+        #     [
+        #         LayerDemapper(
+        #             self._sys_parameters.transmitters[mcs_list_idx]._layer_mapper,
+        #             sys_parameters.transmitters[mcs_list_idx]._num_bits_per_symbol,
+        #         )
+        #         for mcs_list_idx in range(self._num_mcss_supported)
+        #     ]
+        # )
         self._layer_demappers = nn.ModuleList(
             [
                 LayerDemapper(
