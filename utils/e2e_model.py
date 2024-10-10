@@ -434,7 +434,7 @@ class E2E_Model(nn.Module):
             tx = self._sys_parameters.transmitters[0]
             print(f"Resource Grid initialized: {tx._resource_grid is not None}")
 
-            # Convert num_pilots and num_res to PyTorch tensors
+            # Convert num_pilots and num_res to Python floats via PyTorch
             print("flag2.1")
             num_pilots = (
                 tx._resource_grid.num_pilot_symbols.item()
@@ -451,7 +451,9 @@ class E2E_Model(nn.Module):
 
             # Perform the PyTorch operation with correct types
             print("flag2.3")
-            ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
+            ebno_db = ebno_db - 10.0 * torch.log10(
+                1.0 - torch.tensor(num_pilots) / torch.tensor(num_res)
+            )
 
             # Debugging: Check the transmitter attributes
             print(
@@ -460,7 +462,9 @@ class E2E_Model(nn.Module):
             print(
                 f"Target coderate: {self._transmitters[mcs_arr_eval[0]]._target_coderate}"
             )
+
             print("flag2.4")
+            # Call the noise calculation function with the correct PyTorch tensor values
             no = ebnodb2no(
                 ebno_db,
                 self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
@@ -469,12 +473,13 @@ class E2E_Model(nn.Module):
             )
         else:
             print("flag2.5")
+            # Directly use PyTorch to calculate noise power density
             no = torch.pow(10.0, -ebno_db / 10)
 
         # Check the result of noise calculation
         print(f"Noise Power Density (no): {no}")
 
-        # Apply channel
+        # Apply the channel based on system parameters
         if self._sys_parameters.channel_type == "AWGN":
             y = self._channel(x, no)
             h = torch.ones_like(y)
@@ -488,9 +493,11 @@ class E2E_Model(nn.Module):
 
         if self._sys_parameters.system == "nrx":
             if self._training:
+                # Return losses during training phase
                 losses = self._receiver(y, active_dmrs, b, h, mcs_ue_mask, mcs_arr_eval)
                 return losses
             else:
+                # Return the results during evaluation phase
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
                     (y, active_dmrs), mcs_arr_eval, mcs_ue_mask_eval=mcs_ue_mask
                 )
