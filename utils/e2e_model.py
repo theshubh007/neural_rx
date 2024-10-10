@@ -433,15 +433,16 @@ class E2E_Model(nn.Module):
         if self._sys_parameters.ebno:
             print("flag2.1")
             tx = self._sys_parameters.transmitters[0]
-            num_pilots = (
-                tx._resource_grid.num_pilot_symbols.numpy()
-            )  # Convert TensorFlow tensor to numpy scalar
+            # Assuming they are already integers
+            num_pilots = tx._resource_grid.num_pilot_symbols  # Directly use the integer
             num_res = (
-                tx._resource_grid.num_resource_elements.numpy()
-            )  # Convert TensorFlow tensor to numpy scalar
-            print(f"Number of pilots: {num_pilots}")
+                tx._resource_grid.num_resource_elements
+            )  # Directly use the integer
 
-            # Ensure that the tensors are converted to floats correctly
+            print(f"Number of pilots: {num_pilots}")
+            print(f"Number of resource elements: {num_res}")
+
+            # Perform the PyTorch operation for adjusting ebno_db
             ebno_db = ebno_db - 10.0 * torch.log10(1.0 - num_pilots / num_res)
 
             # Manually perform ebnodb2no logic
