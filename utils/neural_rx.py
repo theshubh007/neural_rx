@@ -681,14 +681,20 @@ class CGNNOFDM(nn.Module):
         # Reshape the index tensor to match pilots_only
         # We reshape pilot_ind to have 3D indices
         # Assume that pilot_ind[0] represents indices for the 3D tensor
-        pilot_ind_reshaped = torch.stack(
-            torch.meshgrid(
-                torch.arange(2),  # First dimension size (max_num_tx)
-                torch.arange(14),  # Second dimension size (num_ofdm_symbols)
-                torch.arange(48),  # Third dimension size (fft_size)
-            ),
-            dim=-1,
-        ).reshape(-1, 3)
+        # Reshape pilot_ind to match the number of dimensions in pilots_only
+        pilot_ind_reshaped = pilot_ind[0].view(
+            -1, 1, 1
+        )  # Reshaping index to align with the 3D tensor
+
+        # Assuming pilots_only has 3 dimensions: (2, 14, 48), expand the index tensor
+        pilot_ind_expanded = pilot_ind_reshaped.expand(
+            pilots_only.size(0), pilots_only.size(1), pilots_only.size(2)
+        )
+
+        # Now we can use scatter with correctly shaped indices
+        pilots_only = torch.zeros(
+            rg_type_torch.shape, dtype=pilots_torch.dtype
+        ).scatter_(0, pilot_ind_expanded, pilots_torch)
 
         # Use scatter_ to place the pilots into the pilots_only tensor
         for idx in range(len(pilot_ind_reshaped)):
