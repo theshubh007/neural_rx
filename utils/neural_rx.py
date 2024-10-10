@@ -32,17 +32,23 @@ from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
 class SeparableConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+
+    def __init__(self, in_channels, out_channels, kernel_size, bias=False):
         super(SeparableConv2d, self).__init__()
         self.depthwise = nn.Conv2d(
-            in_channels, in_channels, kernel_size, stride, padding, groups=in_channels
+            in_channels,
+            in_channels,
+            kernel_size=kernel_size,
+            groups=in_channels,
+            bias=bias,
+            padding=1,
         )
-        self.pointwise = nn.Conv2d(in_channels, out_channels, 1)
+        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
     def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        return x
+        out = self.depthwise(x)
+        out = self.pointwise(out)
+        return out
 
 
 def to_numpy(input_array):
@@ -136,15 +142,17 @@ class StateInit(nn.Module):
             raise NotImplementedError("Unknown layer_type selected.")
 
         # Hidden blocks
-        self._hidden_conv = []
+        self._hidden_conv = nn.ModuleList()
+        in_channels = 3  # Assuming input has 3 channels (y, pe, h_hat)
         for n in num_units:
-            conv = layer(n, (3, 3), padding="same", activation="relu", dtype=dtype)
+            conv = nn.Sequential(
+                layer(in_channels, n, kernel_size=3, padding=1), nn.ReLU()
+            )
             self._hidden_conv.append(conv)
+            in_channels = n
 
-        # Output block
-        self._output_conv = layer(
-            d_s, (3, 3), activation=None, padding="same", dtype=dtype
-        )
+        #  Output block
+        self._output_conv = layer(in_channels, d_s, kernel_size=3, padding=1)
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
