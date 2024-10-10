@@ -476,7 +476,11 @@ class CGNN(nn.Module):
 
         # Channel estimate readout
         self._readout_chest = ReadoutChEst(
-            num_rx_ant, num_units_readout, layer_type=layer_type_readout, dtype=dtype
+            num_rx_ant,
+            num_units_readout,
+            in_features=in_features,
+            layer_type=layer_type_readout,
+            dtype=dtype,
         )
 
         self._num_mcss_supported = len(num_bits_per_symbol)
