@@ -933,6 +933,10 @@ class NeuralPUSCHReceiver(nn.Module):
         self._tb_decoders = []
 
         self._num_mcss_supported = len(sys_parameters.mcs_index)
+        rg = sys_parameters.transmitters[0]._resource_grid
+        self._pilots = rg.pilot_pattern.pilots  # Extract pilots from resource grid
+        self._num_mcss_supported = len(sys_parameters.mcs_index)
+        self._manual_channel_estimator = ManualChannelEstimator(self._pilots)
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
                 self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
