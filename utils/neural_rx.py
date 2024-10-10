@@ -725,41 +725,39 @@ class CGNNOFDM(nn.Module):
         # Precompute distances to the nearest pilots in time and frequency
         self._compute_pilot_distances(pilot_ind)
 
+
     def _compute_pilot_distances(self, pilot_ind):
         """
         Computes the distances to the nearest pilot in both time and frequency dimensions.
+        Handles dimension mismatches safely and ensures correct broadcasting.
         """
         # Time and frequency indices
-        t_ind = torch.arange(self._rg.num_ofdm_symbols)
-        f_ind = torch.arange(self._rg.fft_size)
+        t_ind = torch.arange(self._rg.num_ofdm_symbols)  # 14 OFDM symbols
+        f_ind = torch.arange(self._rg.fft_size)  # FFT size, e.g., 76 subcarriers
 
         # Initialize distance matrices for time and frequency
+        num_pilots = len(pilot_ind[0])  # Number of valid pilot positions
         pilots_dist_time = torch.zeros(
-            (
-                self._max_num_tx,
-                self._rg.num_ofdm_symbols,
-                self._rg.fft_size,
-                len(pilot_ind),
-            )
+            (self._max_num_tx, self._rg.num_ofdm_symbols, self._rg.fft_size, num_pilots)
         )
         pilots_dist_freq = torch.zeros(
-            (
-                self._max_num_tx,
-                self._rg.num_ofdm_symbols,
-                self._rg.fft_size,
-                len(pilot_ind),
-            )
+            (self._max_num_tx, self._rg.num_ofdm_symbols, self._rg.fft_size, num_pilots)
         )
 
         # Calculate the distance for each transmitter
         for tx_ind in range(self._max_num_tx):
-            for i, p_ind in enumerate(pilot_ind):
-                pilots_dist_time[tx_ind, :, :, i] = torch.abs(p_ind - t_ind).unsqueeze(
-                    1
-                )
-                pilots_dist_freq[tx_ind, :, :, i] = torch.abs(p_ind - f_ind).unsqueeze(
-                    0
-                )
+            for i, p_ind in enumerate(pilot_ind[0]):  # Pilot index is a 1D array
+                # Ensure p_ind is compatible with the size of t_ind and f_ind for broadcasting
+                if p_ind < self._rg.num_ofdm_symbols:  # Ensure pilot index is within bounds
+                    pilots_dist_time[tx_ind, :, :, i] = (
+                        torch.abs(t_ind - p_ind).unsqueeze(1).expand(-1, self._rg.fft_size)
+                    )
+                if p_ind < self._rg.fft_size:  # Ensure pilot index is within bounds
+                    pilots_dist_freq[tx_ind, :, :, i] = (
+                        torch.abs(f_ind - p_ind)
+                        .unsqueeze(0)
+                        .expand(self._rg.num_ofdm_symbols, -1)
+                    )
 
         # Normalize the distances for stability
         nearest_pilot_dist_time = pilots_dist_time.min(dim=-1)[0]
