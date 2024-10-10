@@ -481,7 +481,9 @@ class E2E_Model(nn.Module):
         else:
             # Other channel types: pass only x
             print("flag2.4")
-            y, h = self._channel(x)
+            y, h = self._channel(
+                [x, no]
+            )  # Pass both x and no even for non-AWGN channels
 
         ###################################
         # Receiver
