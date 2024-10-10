@@ -431,58 +431,24 @@ class E2E_Model(nn.Module):
         print("flag2")
 
         if self._sys_parameters.ebno:
-            tx = self._sys_parameters.transmitters[0]
-            print(f"Resource Grid initialized: {tx._resource_grid is not None}")
-
-            # Convert num_pilots and num_res to Python floats via PyTorch
             print("flag2.1")
-            num_pilots = (
-                tx._resource_grid.num_pilot_symbols.item()
-            )  # Convert to Python float
-            num_res = (
-                tx._resource_grid.num_resource_elements.item()
-            )  # Convert to Python float
-            print(f"Number of pilot symbols: {num_pilots}")
-            print(f"Number of resource elements: {num_res}")
+            tx = self._sys_parameters.transmitters[0]
+            num_pilots = tx._resource_grid.num_pilot_symbols.item()
+            num_res = tx._resource_grid.num_resource_elements.item()
+            print(f"Number of pilots: {num_pilots}")
+            ebno_db = ebno_db - 10.0 * torch.log10(1.0 - num_pilots / num_res)
 
-            print("flag2.2")
-            # Debugging: Print values
-            print(f"num_pilots: {num_pilots}, num_res: {num_res}")
-
-            # Perform the PyTorch operation with correct types
-            print("flag2.3")
-            ebno_db = ebno_db - 10.0 * torch.log10(
-                1.0 - torch.tensor(num_pilots) / torch.tensor(num_res)
-            )
-
-            # Debugging: Check the transmitter attributes
-            print(
-                f"Num bits per symbol: {self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol}"
-            )
-            print(
-                f"Target coderate: {self._transmitters[mcs_arr_eval[0]]._target_coderate}"
-            )
-
-            print("flag2.4")
-            # Manually perform the noise calculation logic (equivalent to ebnodb2no)
-
-            # Convert ebno_db from dB to linear scale
+            # Manually perform ebnodb2no logic
             ebno = torch.pow(10.0, ebno_db / 10.0)
-
-            # Assuming energy_per_symbol is 1 as per the original function
-            energy_per_symbol = 1
-
-            # Calculate the noise power density `no`
             num_bits_per_symbol = self._transmitters[
-                mcs_arr_eval[0]
+                mcs_arr_eval_idx[0]
             ]._num_bits_per_symbol
-            coderate = self._transmitters[mcs_arr_eval[0]]._target_coderate
-            no = 1 / (ebno * coderate * float(num_bits_per_symbol) / energy_per_symbol)
-
+            coderate = self._transmitters[mcs_arr_eval_idx[0]]._target_coderate
+            energy_per_symbol = 1
+            print(f"Energy per symbol: {energy_per_symbol}")
+            no = 1 / (ebno * coderate * num_bits_per_symbol / energy_per_symbol)
         else:
-            print("flag2.5")
-            # Directly use PyTorch to calculate noise power density
-            no = torch.pow(10.0, -ebno_db / 10)
+            no = torch.pow(10.0, -ebno_db / 10.0)
 
         # Check the result of noise calculation
         print(f"Noise Power Density (no): {no}")
