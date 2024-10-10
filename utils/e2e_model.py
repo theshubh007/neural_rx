@@ -480,6 +480,9 @@ class E2E_Model(nn.Module):
         tf_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
         x = tf.complex(tf_tensor, tf.zeros_like(tf_tensor))
         print(type(x))
+        no = to_numpy(no)
+        tf_tensor = tf.convert_to_tensor(no, dtype=tf.float32)
+        no = tf_tensor
 
         if self._sys_parameters.channel_type == "AWGN":
             # AWGN channel: pass both x and no
@@ -488,14 +491,7 @@ class E2E_Model(nn.Module):
             y = self._channel([x, no])
             h = torch.ones_like(y)  # Simple AWGN channel with no channel response
         else:
-            # # Other channel types: pass only x
-            # print("flag2.4")
-            # print(dir(self._channel))
-            # print(self._sys_parameters.channel_type)
 
-            # y, h = self._channel(
-            #     [x, no]
-            # )  # Pass both x and no even for non-AWGN channels
             print("flag2.5")
             self._channel = AWGN()
             y = self._channel([x, no])
