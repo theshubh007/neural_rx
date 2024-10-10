@@ -626,6 +626,10 @@ class CGNNOFDM(nn.Module):
         self._nrx_dtype = nrx_dtype
         self._debug = debug
 
+        # Debugging flag
+        if self._debug:
+            print(f"CGNNOFDM initialized with debug mode: {debug}")
+
         # Number of MCS supported (Modulation and Coding Scheme)
         self._num_mcss_supported = len(sys_parameters.mcs_index)
 
@@ -679,7 +683,7 @@ class CGNNOFDM(nn.Module):
             self._bce = nn.BCEWithLogitsLoss(reduction="none")
             self._mse = nn.MSELoss(reduction="none")
 
-        # Precompute positional encoding for pilots
+        # Precompute positional encoding for pilots with detailed debug outputs
         self._precompute_pilot_positional_encoding()
 
     def _precompute_pilot_positional_encoding(self):
@@ -687,6 +691,7 @@ class CGNNOFDM(nn.Module):
         Precomputes the positional encoding based on the distance to the nearest pilot
         in both time and frequency, and handles pilot insertion safely.
         """
+
         # Extract resource grid type (data, pilot, guard, DC)
         rg_type = self._rg.build_type_grid()[:, 0].numpy()  # Consider only one stream
         if self._debug:
@@ -722,6 +727,9 @@ class CGNNOFDM(nn.Module):
         # Scatter pilots into the correct locations
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
 
+        if self._debug:
+            print(f"Pilots inserted: {len(pilot_ind[0])}")
+
         # Precompute distances to the nearest pilots in time and frequency
         self._compute_pilot_distances(pilot_ind)
 
@@ -730,6 +738,9 @@ class CGNNOFDM(nn.Module):
         Computes the distances to the nearest pilot in both time and frequency dimensions.
         Handles dimension mismatches safely and ensures correct broadcasting.
         """
+        if self._debug:
+            print(f"Computing pilot distances. Number of pilots: {len(pilot_ind[0])}")
+
         # Time and frequency indices
         t_ind = torch.arange(self._rg.num_ofdm_symbols)  # 14 OFDM symbols
         f_ind = torch.arange(self._rg.fft_size)  # FFT size, e.g., 76 subcarriers
