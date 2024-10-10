@@ -531,40 +531,35 @@ class E2E_Model(nn.Module):
                     type(mcs_ue_mask),
                     type(mcs_arr_eval),
                 )
+
+                y_torch = (
+                    torch.from_numpy(y.numpy()) if isinstance(y, torch.Tensor) else y
+                )
+                active_dmrs_torch = (
+                    torch.from_numpy(active_dmrs.numpy())
+                    if isinstance(active_dmrs, torch.Tensor)
+                    else active_dmrs
+                )
+                h_torch = (
+                    torch.from_numpy(h.numpy()) if isinstance(h, torch.Tensor) else h
+                )
+                # Call the receiver during the evaluation phase
+                b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
+                    (y_torch, active_dmrs_torch),
+                    mcs_arr_eval,
+                    mcs_ue_mask_eval=mcs_ue_mask,
+                )
+
+                print("Evaluation successful.")
                 # Call the receiver, ensure that inputs are PyTorch tensors
-                try:
-                    # Ensure inputs for the receiver are in PyTorch tensor format
-                    y_torch = (
-                        torch.from_numpy(y.numpy())
-                        if isinstance(y, torch.Tensor)
-                        else y
-                    )
-                    active_dmrs_torch = (
-                        torch.from_numpy(active_dmrs.numpy())
-                        if isinstance(active_dmrs, torch.Tensor)
-                        else active_dmrs
-                    )
-                    h_torch = (
-                        torch.from_numpy(h.numpy())
-                        if isinstance(h, torch.Tensor)
-                        else h
-                    )
+                # try:
+                # Ensure inputs for the receiver are in PyTorch tensor format
 
-                    # Call the receiver during the evaluation phase
-                    b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
-                        (y_torch, active_dmrs_torch),
-                        mcs_arr_eval,
-                        mcs_ue_mask_eval=mcs_ue_mask,
-                    )
+                return b, b_hat, h_hat_refined, h_hat
 
-                    print("Evaluation successful.")
-
-                    # Return the original bits `b`, the predicted bits `b_hat`, and the channel estimates `h_hat_refined` and `h_hat`
-                    return b, b_hat, h_hat_refined, h_hat
-
-                except Exception as e:
-                    print(f"Error during evaluation phase: {e}")
-                    return None
+                # except Exception as e:
+                #     print(f"Error during evaluation phase: {e}")
+                #     return None
 
     # def forward(
     #     self,
