@@ -1080,7 +1080,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
         if self._training:
             # In training mode, we expect 5 inputs
-            y, active_tx, b, h, mcs_ue_mask = inputs
+            y, active_tx, b, h, mcs_ue_mask, no = inputs  # Now no is included in inputs
 
             # Re-encode bits in training mode to generate labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
@@ -1109,9 +1109,9 @@ class NeuralPUSCHReceiver(nn.Module):
             return losses
 
         else:
-            # In evaluation mode, we expect 2 inputs and the noise passed separately
+            # In evaluation mode, we expect 3 inputs (y, active_tx, no)
             print("NeuralPUSCHReceiver forward else")
-            y, active_tx = inputs
+            y, active_tx, no = inputs  # Now no is unpacked as part of inputs
             print(f"Noise: {no}")
             print(f"y shape: {y.shape}")
             print(f"active_tx shape: {active_tx.shape}")
