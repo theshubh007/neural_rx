@@ -419,10 +419,26 @@ class E2E_Model(nn.Module):
         print("flag2")
 
         if self._sys_parameters.ebno:
+            # Debugging: Ensure resource grid is initialized and print values
             tx = self._sys_parameters.transmitters[0]
+            print(f"Resource Grid initialized: {tx._resource_grid is not None}")
+
             num_pilots = tx._resource_grid.num_pilot_symbols
             num_res = tx._resource_grid.num_resource_elements
+
+            # Debugging: Print values
+            print(f"num_pilots: {num_pilots}, num_res: {num_res}")
+
             ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
+
+            # Debugging: Check the transmitter attributes
+            print(
+                f"Num bits per symbol: {self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol}"
+            )
+            print(
+                f"Target coderate: {self._transmitters[mcs_arr_eval[0]]._target_coderate}"
+            )
+
             no = ebnodb2no(
                 ebno_db,
                 self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
@@ -431,6 +447,9 @@ class E2E_Model(nn.Module):
             )
         else:
             no = torch.pow(10.0, -ebno_db / 10)
+
+        # Check the result of noise calculation
+        print(f"Noise Power Density (no): {no}")
 
         # Apply channel
         if self._sys_parameters.channel_type == "AWGN":
