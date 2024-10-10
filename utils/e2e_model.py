@@ -435,18 +435,39 @@ class E2E_Model(nn.Module):
             tx = self._sys_parameters.transmitters[0]
 
             # Assuming num_pilot_symbols and num_resource_elements are scalar values
-            # Convert num_pilots and num_res to NumPy arrays using to_numpy()
-            num_pilots = to_numpy(
+            num_pilots = (
                 tx._resource_grid.num_pilot_symbols
-            )  # Convert to NumPy
-            num_res = to_numpy(
+            )  # Keep them as scalar values
+            # Check if num_pilots and num_res are not already in NumPy format
+            if isinstance(num_pilots, int):
+                num_pilots = np.array(
+                    num_pilots, dtype=np.float32
+                )  # Convert integer to NumPy array
+            else:
+                num_pilots = to_numpy(
+                    num_pilots
+                )  # Use to_numpy for other types like tensors
+            num_res = (
                 tx._resource_grid.num_resource_elements
-            )  # Convert to NumPy
+            )  # Keep them as scalar values
+            if isinstance(num_res, int):
+                num_res = np.array(
+                    num_res, dtype=np.float32
+                )  # Convert integer to NumPy array
+            else:
+                num_res = to_numpy(num_res)  # Use to_numpy for other types like tensors
 
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
             print(type(num_pilots))
             print(type(num_res))
+            # Now convert them back to PyTorch tensors for the PyTorch operation
+            num_pilots = torch.tensor(
+                num_pilots, dtype=torch.float32
+            )  # Convert to PyTorch tensor
+            num_res = torch.tensor(
+                num_res, dtype=torch.float32
+            )  # Convert to PyTorch tensor
 
             # Perform the PyTorch operation for adjusting ebno_db
             ebno_db = ebno_db - 10.0 * torch.log10(1.0 - num_pilots / num_res)
