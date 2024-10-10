@@ -435,17 +435,19 @@ class E2E_Model(nn.Module):
             print(f"Resource Grid initialized: {tx._resource_grid is not None}")
 
             # Convert num_pilots and num_res to PyTorch tensors
+            print("flag2.1")
             num_pilots = torch.tensor(
                 tx._resource_grid.num_pilot_symbols, dtype=torch.float32
             )
             num_res = torch.tensor(
                 tx._resource_grid.num_resource_elements, dtype=torch.float32
             )
-
+            print("flag2.2")
             # Debugging: Print values
             print(f"num_pilots: {num_pilots}, num_res: {num_res}")
 
             # Perform the PyTorch operation with correct types
+            print("flag2.3")
             ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
 
             # Debugging: Check the transmitter attributes
@@ -455,7 +457,7 @@ class E2E_Model(nn.Module):
             print(
                 f"Target coderate: {self._transmitters[mcs_arr_eval[0]]._target_coderate}"
             )
-
+            print("flag2.4")
             no = ebnodb2no(
                 ebno_db,
                 self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
@@ -463,6 +465,7 @@ class E2E_Model(nn.Module):
                 self._transmitters[mcs_arr_eval[0]]._resource_grid,
             )
         else:
+            print("flag2.5")
             no = torch.pow(10.0, -ebno_db / 10)
 
         # Check the result of noise calculation
