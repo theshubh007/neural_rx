@@ -1136,8 +1136,8 @@ class NeuralPUSCHReceiver(nn.Module):
             y, active_tx = inputs
 
             # Ensure `active_tx` is not a scalar or improperly shaped tensor
-            print(f"y shape: {y.shape}")
-            print(f"active_tx shape: {active_tx.shape}")
+            # print(f"y shape: {y.shape}")
+            # print(f"active_tx shape: {active_tx.shape}")
 
             # Check the rank (number of dimensions) of active_tx
             if active_tx.dim() < 2:
