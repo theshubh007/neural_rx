@@ -668,14 +668,23 @@ class CGNNOFDM(nn.Module):
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
         # Ensure pilots_torch has the same dtype as torch.zeros
+        # Ensure pilots_torch has the same dtype as torch.zeros
         pilots_torch = torch.tensor(
             pilots, dtype=torch.float32
         )  # Ensure it is a float tensor
 
         # Ensure that torch.zeros has the same dtype as pilots_torch
-        pilots_only = torch.zeros(
-            rg_type_torch.shape, dtype=pilots_torch.dtype
-        ).scatter_(0, pilot_ind[0], pilots_torch)
+        pilots_only = torch.zeros(rg_type_torch.shape, dtype=pilots_torch.dtype)
+
+        # Reshape pilot_ind to match the dimensions of pilots_only
+        # Assuming you want to scatter along the first dimension (axis 0)
+        # Make sure the index has the same number of dimensions as pilots_torch
+        pilot_ind_reshaped = pilot_ind[0].unsqueeze(
+            -1
+        )  # Add extra dimension if necessary
+
+        # Use scatter_ with correctly shaped index tensor
+        pilots_only = pilots_only.scatter_(0, pilot_ind_reshaped, pilots_torch)
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
 
         # Sort the pilots according to which TX they are allocated
