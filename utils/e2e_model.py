@@ -369,7 +369,9 @@ class E2E_Model(nn.Module):
 
         for idx in range(len(mcs_arr_eval)):
             tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
-            print(f"TB Size for MCS index {mcs_arr_eval[idx]}: {tb_size}")
+            print(
+                f"batch_size: {batch_size}, max_num_tx: {self._sys_parameters.max_num_tx}, tb_size: {tb_size}"
+            )
 
             if tb_size is None:
                 raise ValueError(
