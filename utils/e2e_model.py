@@ -483,15 +483,7 @@ class E2E_Model(nn.Module):
             # Other channel types: pass only x
             print("flag2.4")
             print(dir(self._channel))
-            if not hasattr(self._channel, "_lsp"):
-                self._channel._lsp = {
-                    "path_loss": np.zeros(
-                        self.num_rx_antennas
-                    ),  # Placeholder for path loss
-                    "shadow_fading": np.ones(
-                        self.num_rx_antennas
-                    ),  # Placeholder for shadow fading
-                }
+            
             y, h = self._channel(
                 [x, no]
             )  # Pass both x and no even for non-AWGN channels

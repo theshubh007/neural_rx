@@ -246,6 +246,11 @@ class Parameters:
                     enable_pathloss=True,  # Enable path loss
                     enable_shadow_fading=True,  # Enable shadow fading
                 )
+                # Manually initialize _lsp attribute
+                self.channel_model._lsp = {
+                    "path_loss": np.zeros(self.num_rx_antennas),
+                    "shadow_fading": np.ones(self.num_rx_antennas),
+                }
             else:  # UMa
                 self.channel_model = UMa(
                     carrier_frequency=self.carrier_frequency,
@@ -256,7 +261,11 @@ class Parameters:
                     enable_pathloss=True,  # Enable path loss
                     enable_shadow_fading=True,  # Enable shadow fading
                 )
-
+                # Manually initialize _lsp attribute
+                self.channel_model._lsp = {
+                    "path_loss": np.zeros(self.num_rx_antennas),
+                    "shadow_fading": np.ones(self.num_rx_antennas),
+                }
             self.channel = OFDMChannel(
                 channel_model=self.channel_model,
                 resource_grid=self.transmitters[0]._resource_grid,
