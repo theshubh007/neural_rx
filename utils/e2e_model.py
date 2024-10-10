@@ -317,6 +317,7 @@ class E2E_Model(nn.Module):
         active_dmrs=None,
     ):
         """Defines end-to-end system model."""
+        print("Forward: e2e_model")
 
         # Randomly sample num_tx active DMRS ports
         if num_tx is None:
@@ -362,6 +363,7 @@ class E2E_Model(nn.Module):
         # Transmitters
         # One transmitter for each supported MCS
         ###################################
+        print("flag1")
 
         b = []
         for idx in range(len(mcs_arr_eval)):
@@ -389,6 +391,7 @@ class E2E_Model(nn.Module):
         ###################################
         # Channel
         ###################################
+        print("flag2")
 
         if self._sys_parameters.ebno:
             tx = self._sys_parameters.transmitters[0]
@@ -414,6 +417,7 @@ class E2E_Model(nn.Module):
         ###################################
         # Receiver
         ###################################
+        print("flag3")
 
         if self._sys_parameters.system == "nrx":
             if self._training:
