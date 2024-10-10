@@ -937,7 +937,7 @@ class NeuralPUSCHReceiver(nn.Module):
         print("NeuralPUSCHReceiver init")
 
         self._sys_parameters = sys_parameters
-        self._training = training
+        self._training = False
 
         # init transport block encoder/decoder
         self._tb_encoders = []
@@ -1067,7 +1067,7 @@ class NeuralPUSCHReceiver(nn.Module):
         """
         Apply neural receiver.
         """
-
+        self._training = False
         print("NeuralPUSCHReceiver forward")
         print(self.training)
         if self.training:
