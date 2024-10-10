@@ -861,7 +861,7 @@ class NeuralPUSCHReceiver(nn.Module):
             layer_type_dense=sys_parameters.layer_type_dense,
             layer_type_conv=sys_parameters.layer_type_conv,
             layer_type_readout=sys_parameters.layer_type_readout,
-            dtype=torch.float32,
+            # dtype=torch.float32,
         )
 
     def estimate_channel(self, y, num_tx):
