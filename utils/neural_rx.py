@@ -834,6 +834,7 @@ class CGNNOFDM(nn.Module):
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False, **kwargs):
         super().__init__()
+        print("NeuralPUSCHReceiver init")
 
         self._sys_parameters = sys_parameters
         self._training = training
@@ -932,7 +933,9 @@ class NeuralPUSCHReceiver(nn.Module):
         return h
 
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+        print("NeuralPUSCHReceiver forward")
         if self._training:
+            print("Training mode")
             y, active_tx, b, h, mcs_ue_mask = inputs
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]
@@ -940,7 +943,7 @@ class NeuralPUSCHReceiver(nn.Module):
                 self._tb_encoders[mcs_arr_eval[idx]](b[idx])
                 for idx in range(len(mcs_arr_eval))
             ]
-
+            print("bits: ", bits)
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
             if h is not None:
