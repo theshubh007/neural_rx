@@ -277,7 +277,7 @@ class ReadoutLLRs(nn.Module):
     r"""
     Network computing LLRs from the state vectors.
 
-    This is a MLP with len(num_units) hidden layers with ReLU activation and
+    This is an MLP with len(num_units) hidden layers with ReLU activation and
     num_units[i] units for the ith layer.
     The output layer is a dense layer without non-linearity and with
     `num_bits_per_symbol` units.
@@ -287,6 +287,7 @@ class ReadoutLLRs(nn.Module):
         self,
         num_bits_per_symbol,
         num_units,
+        in_features,  # You need to pass the input feature size
         layer_type="dense",
         dtype=torch.float32,
         **kwargs,
@@ -299,19 +300,26 @@ class ReadoutLLRs(nn.Module):
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
-        # Hidden layers
-        self._hidden_layers = nn.ModuleList([layer(n, dtype=dtype) for n in num_units])
-        self._output_layer = layer(num_bits_per_symbol, dtype=dtype)
+        # Initialize the hidden layers
+        self._hidden_layers = nn.ModuleList()
+
+        # Set up the first layer with the given input feature size
+        for n in num_units:
+            self._hidden_layers.append(layer(in_features, n))
+            in_features = n  # Update in_features for the next layer
+
+        # Output layer
+        self._output_layer = layer(in_features, num_bits_per_symbol)
 
     def forward(self, s):
-        # Input of the MLP
-        z = s
-        # Apply MLP
+        # Apply hidden layers
         for layer in self._hidden_layers:
-            z = F.relu(layer(z))
-        llr = self._output_layer(z)
+            s = F.relu(layer(s))
 
-        return llr  # LLRs on the transmitted bits
+        # Apply output layer
+        llr = self._output_layer(s)
+
+        return llr
 
 
 class ReadoutChEst(nn.Module):
