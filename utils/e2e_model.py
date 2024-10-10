@@ -441,7 +441,7 @@ class E2E_Model(nn.Module):
             num_res = torch.tensor(
                 tx._resource_grid.num_resource_elements
             )  # Convert to PyTorch tensor
-
+            print("flag2.2")
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
 
@@ -450,6 +450,7 @@ class E2E_Model(nn.Module):
 
             # Manually perform ebnodb2no logic
             ebno = torch.pow(10.0, ebno_db / 10.0)
+            print(f"Eb/No: {ebno}")
             num_bits_per_symbol = self._transmitters[
                 mcs_arr_eval_idx[0]
             ]._num_bits_per_symbol
