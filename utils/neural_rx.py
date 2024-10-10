@@ -14,6 +14,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 # from tensorflow.keras import Model
 # from tensorflow.keras.layers import Dense, Conv2D, SeparableConv2D, Layer
@@ -23,6 +24,34 @@ from sionna.utils import (
 )
 from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
+
+
+def to_numpy(input_array):
+    # Check if the input is already a NumPy array
+    if isinstance(input_array, np.ndarray):
+        return input_array
+
+    # Check if the input is a TensorFlow tensor
+    try:
+        import tensorflow as tf
+
+        if isinstance(input_array, tf.Tensor):
+            return input_array.numpy()
+    except ImportError:
+        pass
+
+    # Check if the input is a PyTorch tensor
+    try:
+        import torch
+
+        if isinstance(input_array, torch.Tensor):
+            return input_array.cpu().numpy()
+    except ImportError:
+        pass
+
+    raise TypeError(
+        "Input type not supported. Please provide a NumPy array, TensorFlow tensor, or PyTorch tensor."
+    )
 
 
 class StateInit(nn.Module):
@@ -909,12 +938,29 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
+        import tensorflow as tf
+
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            h_hat, _ = self._ls_est([y, 1e-1])
+            # Convert PyTorch tensor `y` to a NumPy array, then to a TensorFlow tensor
+            y_numpy = y.cpu().numpy()  # Convert PyTorch tensor to NumPy array
+            y_tf = tf.convert_to_tensor(
+                y_numpy, dtype=tf.complex64
+            )  # Convert to TensorFlow tensor
+
+            # Perform the channel estimation with TensorFlow
+            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
+
+            # Convert the result back to NumPy and then to PyTorch
+            h_hat_numpy = h_hat_tf.numpy()  # Convert TensorFlow tensor to NumPy array
+            h_hat = torch.from_numpy(h_hat_numpy).to(
+                y.dtype
+            )  # Convert back to PyTorch tensor
+
+            # Perform the necessary PyTorch operations on h_hat
             h_hat = h_hat[:, 0, :, :num_tx, 0]
             h_hat = h_hat.permute(0, 2, 4, 3, 1)
             h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
