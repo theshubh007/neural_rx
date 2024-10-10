@@ -1024,7 +1024,15 @@ class NeuralPUSCHReceiver(nn.Module):
                 )
 
             # Dummy value for N0 as it is not used anyway.
-            h_hat, _ = self._ls_est([y, 1e-1])
+            import tensorflow as tf
+
+            y_numpy = to_numpy(y)
+            y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
+            # Call the TensorFlow LS estimator
+            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
+            # h_hat, _ = self._ls_est([y, 1e-1])
+            h_hat_numpy = to_numpy(h_hat_tf)
+            h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
 
             # Reshaping to the expected shape
             # h_hat shape: [batch_size, num_tx, num_effective_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
@@ -1111,7 +1119,8 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
-            print(num_tx)
+
+            print(f"Number of transmit antennas (num_tx): {num_tx}")
             h_hat = self.estimate_channel(y, num_tx)
             print(h_hat.shape, h_hat)
 
