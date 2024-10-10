@@ -242,7 +242,11 @@ class UpdateState(nn.Module):
         self._hidden_conv = nn.ModuleList()
         for n in num_units:
             conv = nn.Sequential(
-                layer(in_channels=None, out_channels=n, kernel_size=(3, 3), padding=1),
+                layer(
+                    in_channels=None,
+                    out_channels=n,
+                    kernel_size=(3, 3),
+                ),
                 nn.ReLU(),
             )
             self._hidden_conv.append(conv)
