@@ -667,42 +667,20 @@ class CGNNOFDM(nn.Module):
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
-        # Ensure pilots_torch has the same dtype as torch.zeros
-        # Ensure pilots_torch has the same dtype as torch.zeros
-        # Ensure pilots_torch has the same dtype as torch.zeros
-        # Ensure pilots_torch has the same dtype as torch.zeros
-        pilots_torch = torch.tensor(
-            pilots, dtype=torch.float32
-        )  # Ensure it is a float tensor
+        pilots_torch = torch.tensor(pilots, dtype=torch.float32)
 
-        # Ensure that torch.zeros has the same dtype as pilots_torch
-        pilots_only = torch.zeros(rg_type_torch.shape, dtype=pilots_torch.dtype)
+        # Initialize the pilots_only tensor
+        pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
 
-        # Reshape the index tensor to match pilots_only
-        # We reshape pilot_ind to have 3D indices
-        # Assume that pilot_ind[0] represents indices for the 3D tensor
-        # Reshape pilot_ind to match the number of dimensions in pilots_only
-        pilot_ind_reshaped = pilot_ind[0].view(
-            -1, 1, 1
-        )  # Reshaping index to align with the 3D tensor
+        # Make sure pilot_ind[0] has the correct shape for scatter
+        if pilot_ind[0].dim() == 1:
+            pilot_ind_reshaped = pilot_ind[0].unsqueeze(1).expand(-1, 1)
+        else:
+            pilot_ind_reshaped = pilot_ind[0]
 
-        # Assuming pilots_only has 3 dimensions: (2, 14, 48), expand the index tensor
-        pilot_ind_expanded = pilot_ind_reshaped.expand(
-            pilots_only.size(0), pilots_only.size(1), pilots_only.size(2)
-        )
-
-        # Now we can use scatter with correctly shaped indices
-        pilots_only = torch.zeros(
-            rg_type_torch.shape, dtype=pilots_torch.dtype
-        ).scatter_(0, pilot_ind_expanded, pilots_torch)
-
-        # Use scatter_ to place the pilots into the pilots_only tensor
-        for idx in range(len(pilot_ind_reshaped)):
-            pilots_only[
-                pilot_ind_reshaped[idx][0],
-                pilot_ind_reshaped[idx][1],
-                pilot_ind_reshaped[idx][2],
-            ] = pilots_torch[idx]
+        # Scatter pilots into the appropriate locations in pilots_only
+        for i, p_ind in enumerate(pilot_ind_reshaped):
+            pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
 
         # Continue with the rest of your code
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
@@ -711,11 +689,11 @@ class CGNNOFDM(nn.Module):
 
         # Sort the pilots according to which TX they are allocated
         pilot_ind_sorted = [[] for _ in range(max_num_tx)]
-        for p_ind in pilot_ind:
+        for p_ind in zip(*pilot_ind):
             tx_ind = p_ind[0]
             re_ind = p_ind[1:]
             pilot_ind_sorted[tx_ind].append(re_ind)
-        pilot_ind_sorted = torch.tensor(pilot_ind_sorted)
+        pilot_ind_sorted = torch.tensor(pilot_ind_sorted, dtype=torch.long)
 
         # Distance to the nearest pilot in time and frequency
         pilots_dist_time = torch.zeros(
