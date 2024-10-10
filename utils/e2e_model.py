@@ -13,7 +13,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from sionna.utils import BinarySource, expand_to_rank, ebnodb2no
+from sionna.utils import BinarySource, expand_to_rank
 from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
 
@@ -464,13 +464,21 @@ class E2E_Model(nn.Module):
             )
 
             print("flag2.4")
-            # Call the noise calculation function with the correct PyTorch tensor values
-            no = ebnodb2no(
-                ebno_db,
-                self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
-                self._transmitters[mcs_arr_eval[0]]._target_coderate,
-                self._transmitters[mcs_arr_eval[0]]._resource_grid,
-            )
+            # Manually perform the noise calculation logic (equivalent to ebnodb2no)
+
+            # Convert ebno_db from dB to linear scale
+            ebno = torch.pow(10.0, ebno_db / 10.0)
+
+            # Assuming energy_per_symbol is 1 as per the original function
+            energy_per_symbol = 1
+
+            # Calculate the noise power density `no`
+            num_bits_per_symbol = self._transmitters[
+                mcs_arr_eval[0]
+            ]._num_bits_per_symbol
+            coderate = self._transmitters[mcs_arr_eval[0]]._target_coderate
+            no = 1 / (ebno * coderate * float(num_bits_per_symbol) / energy_per_symbol)
+
         else:
             print("flag2.5")
             # Directly use PyTorch to calculate noise power density
