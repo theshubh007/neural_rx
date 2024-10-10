@@ -387,11 +387,13 @@ class E2E_Model(nn.Module):
             )
 
             # Print shapes to debug
+            print("Flag1.2.1")
+            print(f"Shape of b[idx]: {b[idx].shape}")
             print(f"Shape of _mcs_ue_mask: {_mcs_ue_mask.shape}")
             print(
                 f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {self._transmitters[mcs_arr_eval[idx]](b[idx]).shape}"
             )
-
+            print("Flag1.2.2")
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
         # Mask non-active DMRS ports by multiplying with 0
