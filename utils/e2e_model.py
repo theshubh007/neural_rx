@@ -419,16 +419,21 @@ class E2E_Model(nn.Module):
         print("flag2")
 
         if self._sys_parameters.ebno:
-            # Debugging: Ensure resource grid is initialized and print values
             tx = self._sys_parameters.transmitters[0]
             print(f"Resource Grid initialized: {tx._resource_grid is not None}")
 
-            num_pilots = tx._resource_grid.num_pilot_symbols
-            num_res = tx._resource_grid.num_resource_elements
+            # Convert num_pilots and num_res to PyTorch tensors
+            num_pilots = torch.tensor(
+                tx._resource_grid.num_pilot_symbols, dtype=torch.float32
+            )
+            num_res = torch.tensor(
+                tx._resource_grid.num_resource_elements, dtype=torch.float32
+            )
 
             # Debugging: Print values
             print(f"num_pilots: {num_pilots}, num_res: {num_res}")
 
+            # Perform the PyTorch operation with correct types
             ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
 
             # Debugging: Check the transmitter attributes
