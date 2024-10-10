@@ -1098,12 +1098,14 @@ class NeuralPUSCHReceiver(nn.Module):
             return losses
 
         else:
+            # In evaluation, we expect only 2 inputs
             y, active_tx = inputs
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
             h_hat = self.estimate_channel(y, num_tx)
 
+            # Call the neural receiver and get llr and h_hat_refined
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
@@ -1113,6 +1115,7 @@ class NeuralPUSCHReceiver(nn.Module):
             # Apply TBDecoding
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
 
+            # Return the decoded bits, refined channel estimates, and CRC status
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
