@@ -725,7 +725,6 @@ class CGNNOFDM(nn.Module):
         # Precompute distances to the nearest pilots in time and frequency
         self._compute_pilot_distances(pilot_ind)
 
-
     def _compute_pilot_distances(self, pilot_ind):
         """
         Computes the distances to the nearest pilot in both time and frequency dimensions.
@@ -748,9 +747,13 @@ class CGNNOFDM(nn.Module):
         for tx_ind in range(self._max_num_tx):
             for i, p_ind in enumerate(pilot_ind[0]):  # Pilot index is a 1D array
                 # Ensure p_ind is compatible with the size of t_ind and f_ind for broadcasting
-                if p_ind < self._rg.num_ofdm_symbols:  # Ensure pilot index is within bounds
+                if (
+                    p_ind < self._rg.num_ofdm_symbols
+                ):  # Ensure pilot index is within bounds
                     pilots_dist_time[tx_ind, :, :, i] = (
-                        torch.abs(t_ind - p_ind).unsqueeze(1).expand(-1, self._rg.fft_size)
+                        torch.abs(t_ind - p_ind)
+                        .unsqueeze(1)
+                        .expand(-1, self._rg.fft_size)
                     )
                 if p_ind < self._rg.fft_size:  # Ensure pilot index is within bounds
                     pilots_dist_freq[tx_ind, :, :, i] = (
@@ -951,13 +954,29 @@ class NeuralPUSCHReceiver(nn.Module):
 
             import tensorflow as tf
 
+            # Extract relevant system parameters
+            num_rx_ant = self._sys_parameters.num_rx_antennas  # Number of receiver antennas
+            rg = self._sys_parameters.transmitters[0]._resource_grid
+            num_ofdm_symbols = rg.num_ofdm_symbols  # Number of OFDM symbols
+            fft_size = rg.fft_size  # FFT size
+            batch_size = y.shape[0]  # First dimension is the batch size
+
+            # Debugging info for the extracted dimensions
+            print(f"batch_size: {batch_size}")
+            print(f"num_rx_ant: {num_rx_ant}")
+            print(f"num_ofdm_symbols: {num_ofdm_symbols}")
+            print(f"fft_size: {fft_size}")
+            print(f"num_tx: {num_tx}")
+
             # Convert PyTorch tensor `y` to TensorFlow tensor
             y_numpy = y.cpu().numpy()
             y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
 
+            # Reshape `y_tf` to match the expected shape for the LS estimator
+            y_tf = tf.reshape(y_tf, [batch_size, 1, num_rx_ant, num_ofdm_symbols, fft_size])
+
             # Debug: Print shape of `y_tf` and ensure indices are valid
-            print("y_tf shape:", y_tf.shape)
-            print("num_tx:", num_tx)
+            print("Reshaped y_tf shape:", y_tf.shape)
 
             # Perform the channel estimation with TensorFlow
             h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
