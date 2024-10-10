@@ -1013,72 +1013,106 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        """
-        Use manual LS-based channel estimation.
-        """
-        # Call the manual channel estimator
-        h_hat = self._manual_channel_estimator.estimate_channel(y, num_tx)
+        # y has shape [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
+
+        if self._sys_parameters.initial_chest == "ls":
+            if self._sys_parameters.mask_pilots:
+                raise ValueError(
+                    "Cannot use initial channel estimator if pilots are masked."
+                )
+
+            # Dummy value for N0 as it is not used anyway.
+            h_hat, _ = self._ls_est([y, 1e-1])
+
+            # Reshaping to the expected shape
+            # h_hat shape: [batch_size, num_tx, num_effective_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
+            h_hat = h_hat[:, 0, :, :num_tx, 0]
+            h_hat = h_hat.permute(0, 2, 4, 3, 1)
+            h_hat = torch.cat([torch.real(h_hat), torch.imag(h_hat)], dim=-1)
+
+        elif self._sys_parameters.initial_chest is None:
+            h_hat = None
+
         return h_hat
 
     def preprocess_channel_ground_truth(self, h):
-        h = h.squeeze(1)
-        h = h.permute(0, 2, 5, 4, 1, 3)
-        w = self._precoding_mat.unsqueeze(0).expand_as(h)
-        h = (h @ w).squeeze(-1)
-        h = torch.cat([h.real, h.imag], dim=-1)
+        # h: [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols, num_effective_subcarriers]
+
+        # Assume only one rx
+        h = torch.squeeze(
+            h, dim=1
+        )  # [batch_size, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols, fft_size]
+
+        # Reshape h
+        h = h.permute(
+            0, 2, 5, 4, 1, 3
+        )  # [batch_size, num_tx, num_ofdm_symbols, num_effective_subcarriers, num_rx_ant, num_tx_ant]
+
+        # Multiply by precoding matrices to compute effective channels
+        w = self._precoding_mat.unsqueeze(0).unsqueeze(
+            2
+        )  # [1, num_tx, 1, 1, num_tx_ant, 1]
+        h = torch.matmul(h, w).squeeze(
+            -1
+        )  # [batch_size, num_tx, num_ofdm_symbols, num_effective_subcarriers, num_rx_ant]
+
+        # Complex-to-real
+        h = torch.cat(
+            [torch.real(h), torch.imag(h)], dim=-1
+        )  # [batch_size, num_tx, num_ofdm_symbols, num_effective_subcarriers, 2*num_rx_ant]
+
         return h
 
     def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
-        print("NeuralPUSCHReceiver forward")
-        if self._training:
-            print("Training mode")
+        """
+        Apply neural receiver.
+        """
+        if self.training:
             y, active_tx, b, h, mcs_ue_mask = inputs
+
+            # Re-encode bits in training mode to generate labels
+            # Avoids the need for post-FEC bits as labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
-                b = [b]
-            bits = [
-                self._tb_encoders[mcs_arr_eval[idx]](b[idx])
-                for idx in range(len(mcs_arr_eval))
-            ]
-            print("flag1")
-            print("bits: ", bits)
+                b = [b]  # generate new list if b is not provided as list
+
+            bits = []
+            for idx in range(len(mcs_arr_eval)):
+                bits.append(
+                    self._sys_parameters.transmitters[mcs_arr_eval[idx]]._tb_encoder(
+                        b[idx]
+                    )
+                )
+
+            # Initial channel estimation
             num_tx = active_tx.shape[1]
-            print("num_tx: ", num_tx, type(num_tx))
-
-            # Call manual channel estimation
             h_hat = self.estimate_channel(y, num_tx)
-            print("h_hat: ", h_hat, type(h_hat))
 
+            # Reshaping `h` to the expected shape and apply precoding matrices
             if h is not None:
                 h = self.preprocess_channel_ground_truth(h)
-                print("h: ", h, type(h))
 
-            # Pass inputs to the neural receiver model
+            # Apply neural receiver and return loss
             losses = self._neural_rx(
                 (y, h_hat, active_tx, bits, h, mcs_ue_mask), mcs_arr_eval
             )
-            print("losses: ", losses, type(losses))
             return losses
 
         else:
-            print("Evaluation mode")
             y, active_tx = inputs
+
+            # Initial channel estimation
             num_tx = active_tx.shape[1]
-            print("num_tx: ", num_tx, type(num_tx))
-
-            # Call manual channel estimation for evaluation
             h_hat = self.estimate_channel(y, num_tx)
-            print("h_hat: ", h_hat, type(h_hat))
 
-            # Perform LLR and channel refinement
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
-            print("llr: ", llr, type(llr))
 
-            # Decode the received bits
+            # Apply TBDecoding
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
+
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
 
