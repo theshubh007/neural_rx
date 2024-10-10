@@ -1058,6 +1058,7 @@ class NeuralPUSCHReceiver(nn.Module):
             err_var = torch.from_numpy(err_var_numpy).to(y.device)
 
             # Return both channel estimates and error variance
+            print(h_hat.shape, err_var.shape)
             return h_hat, err_var
 
     def preprocess_channel_ground_truth(self, h):
