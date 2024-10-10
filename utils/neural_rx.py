@@ -937,40 +937,57 @@ class NeuralPUSCHReceiver(nn.Module):
             dtype=sys_parameters.nrx_dtype,
         )
 
-    def estimate_channel(self, y, num_tx):
-        if self._sys_parameters.initial_chest == "ls":
-            if self._sys_parameters.mask_pilots:
-                raise ValueError(
-                    "Cannot use initial channel estimator if pilots are masked."
+        def estimate_channel(self, y, num_tx):
+            if self._sys_parameters.initial_chest == "ls":
+                if self._sys_parameters.mask_pilots:
+                    raise ValueError(
+                        "Cannot use initial channel estimator if pilots are masked."
+                    )
+
+                import tensorflow as tf
+
+                # Assuming y shape is [batch_size, num_rx, num_rx_ant, num_ofdm_symbols * fft_size]
+                # You need to reshape y to match [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size]
+
+                # Example reshaping (you may need to adjust num_ofdm_symbols and fft_size)
+                batch_size = y.shape[0]
+                num_rx = 2  # Set this to the number of receivers
+                num_rx_ant = 1  # Set this to the number of receiver antennas
+                num_ofdm_symbols = 14  # Set this based on your OFDM configuration
+                fft_size = 1024  # Set this based on your FFT size
+
+                # Reshape y to [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size]
+                y_reshaped = y.view(
+                    batch_size, num_rx, num_rx_ant, num_ofdm_symbols, fft_size
                 )
 
-            import tensorflow as tf
+                # Convert to TensorFlow tensor
+                y_numpy = y_reshaped.cpu().numpy()
+                y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
 
-            # Convert PyTorch tensor `y` to TensorFlow tensor
-            y_numpy = y.cpu().numpy()
-            y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
+                # Debug: Print the new shape of `y_tf`
+                print("y_tf shape after reshaping:", y_tf.shape)
 
-            # Debug: Print shape of `y_tf` and ensure indices are valid
-            print("y_tf shape:", y_tf.shape)
-            print("num_tx:", num_tx)
+                # Perform the channel estimation with TensorFlow
+                h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
 
-            # Perform the channel estimation with TensorFlow
-            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
+                # Convert the result back to NumPy and then to PyTorch
+                h_hat_numpy = (
+                    h_hat_tf.numpy()
+                )  # Convert TensorFlow tensor to NumPy array
+                h_hat = torch.from_numpy(h_hat_numpy).to(
+                    y.dtype
+                )  # Convert back to PyTorch tensor
 
-            # Ensure the estimated tensor is valid
-            if h_hat_tf.shape[0] > 0 and h_hat_tf.shape[2] >= num_tx:
-                # Convert back to PyTorch
-                h_hat_numpy = h_hat_tf.numpy()
-                h_hat = torch.from_numpy(h_hat_numpy).to(y.dtype)
-
-                # Reshape and permute as needed
+                # Perform the necessary PyTorch operations on h_hat
                 h_hat = h_hat[:, 0, :, :num_tx, 0]
                 h_hat = h_hat.permute(0, 2, 4, 3, 1)
                 h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
-                return h_hat
-            else:
-                raise ValueError(f"Invalid shape for h_hat_tf: {h_hat_tf.shape}")
-        return None
+
+            elif self._sys_parameters.initial_chest is None:
+                h_hat = None
+
+            return h_hat
 
     def preprocess_channel_ground_truth(self, h):
         h = h.squeeze(1)
