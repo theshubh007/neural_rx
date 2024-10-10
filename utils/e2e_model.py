@@ -489,13 +489,19 @@ class E2E_Model(nn.Module):
             print("flag2.33")
 
             y = self._channel([x, no])
-            h = torch.ones_like(y)  # Simple AWGN channel with no channel response
+            # Convert TensorFlow tensor y back to NumPy and then to PyTorch
+            y_numpy = to_numpy(y)
+            y_torch = torch.from_numpy(y_numpy)  # Convert to PyTorch tensor
+            h = torch.ones_like(y_torch)  # Simple AWGN channel with no channel response
         else:
 
             print("flag2.5")
             self._channel = AWGN()
             y = self._channel([x, no])
-            h = torch.ones_like(y)  # Simple AWGN channel with no channel
+            # Convert TensorFlow tensor y back to PyTorch
+            y_numpy = to_numpy(y)
+            y_torch = torch.from_numpy(y_numpy)
+            h = torch.ones_like(y_torch)  # Simple AWGN channel with no channel
 
         ###################################
         # Receiver
