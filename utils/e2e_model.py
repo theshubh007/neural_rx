@@ -435,12 +435,13 @@ class E2E_Model(nn.Module):
             tx = self._sys_parameters.transmitters[0]
 
             # Assuming num_pilot_symbols and num_resource_elements are scalar values
-            num_pilots = (
+            # Convert num_pilots and num_res to NumPy arrays using to_numpy()
+            num_pilots = to_numpy(
                 tx._resource_grid.num_pilot_symbols
-            )  # Keep them as scalar values
-            num_res = (
+            )  # Convert to NumPy
+            num_res = to_numpy(
                 tx._resource_grid.num_resource_elements
-            )  # Keep them as scalar values
+            )  # Convert to NumPy
 
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
