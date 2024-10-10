@@ -436,12 +436,15 @@ class E2E_Model(nn.Module):
 
             # Convert num_pilots and num_res to PyTorch tensors
             print("flag2.1")
-            num_pilots = torch.tensor(
-                tx._resource_grid.num_pilot_symbols, dtype=torch.float32
-            )
-            num_res = torch.tensor(
-                tx._resource_grid.num_resource_elements, dtype=torch.float32
-            )
+            num_pilots = (
+                tx._resource_grid.num_pilot_symbols.item()
+            )  # Convert to Python float
+            num_res = (
+                tx._resource_grid.num_resource_elements.item()
+            )  # Convert to Python float
+            print(f"Number of pilot symbols: {num_pilots}")
+            print(f"Number of resource elements: {num_res}")
+
             print("flag2.2")
             # Debugging: Print values
             print(f"num_pilots: {num_pilots}, num_res: {num_res}")
