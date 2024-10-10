@@ -669,16 +669,6 @@ class CGNNOFDM(nn.Module):
         pilot_ind = torch.where(rg_type_torch == 1)  # Should give indices of pilots
         print(f"Shape of pilot_ind: {pilot_ind[0].shape}")  # Debugging pilot indices
 
-        # If no pilots are found, manually inspect grid positions
-        if len(pilot_ind[0]) == 0:
-            print("No valid pilots found! Manually verifying pilot positions...")
-            # Manually check for 1s in rg_type_torch
-            for i in range(rg_type_torch.size(0)):
-                for j in range(rg_type_torch.size(1)):
-                    for k in range(rg_type_torch.size(2)):
-                        if rg_type_torch[i, j, k] == 1:
-                            print(f"Pilot found at index [{i}, {j}, {k}]")
-
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
@@ -710,30 +700,13 @@ class CGNNOFDM(nn.Module):
         print(f"Shape of pilots_only: {pilots_only.shape}")
         print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
 
-        # Continue with the rest of your code
-        pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
-        print(f"Shape of pilots_only: {pilots_only.shape}")
-        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
-
-        # Check if we have any valid pilots
-        if len(pilot_ind[0]) == 0:
-            raise ValueError("No valid pilots found!")
-
-        # Sort the pilots according to which TX they are allocated
-        pilot_ind_sorted = [[] for _ in range(max_num_tx)]
-        for p_ind in zip(*pilot_ind):
-            tx_ind = p_ind[0]
-            re_ind = p_ind[1:]
-            pilot_ind_sorted[tx_ind].append(re_ind)
-        pilot_ind_sorted = torch.tensor(pilot_ind_sorted, dtype=torch.long)
-
-        # Distance to the nearest pilot in time and frequency
+        # Initialize pilots_dist_time and pilots_dist_freq with correct dimensions
         pilots_dist_time = torch.zeros(
             (
                 max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                len(pilot_ind_sorted[0]),
+                len(pilot_ind[0]),  # Using correct pilot indices length
             )
         )
         pilots_dist_freq = torch.zeros(
@@ -741,21 +714,22 @@ class CGNNOFDM(nn.Module):
                 max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                len(pilot_ind_sorted[0]),
+                len(pilot_ind[0]),  # Using correct pilot indices length
             )
         )
 
+        # Compute distance to nearest pilot in time and frequency
         t_ind = torch.arange(self._rg.num_ofdm_symbols)
         f_ind = torch.arange(self._rg.fft_size)
 
         for tx_ind in range(max_num_tx):
-            for i, p_ind in enumerate(pilot_ind_sorted[tx_ind]):
-                pilots_dist_time[tx_ind, :, :, i] = torch.abs(
-                    p_ind[0] - t_ind
-                ).unsqueeze(1)
-                pilots_dist_freq[tx_ind, :, :, i] = torch.abs(
-                    p_ind[1] - f_ind
-                ).unsqueeze(0)
+            for i, p_ind in enumerate(pilot_ind[0]):  # Adjust indexing
+                pilots_dist_time[tx_ind, :, :, i] = torch.abs(p_ind - t_ind).unsqueeze(
+                    1
+                )
+                pilots_dist_freq[tx_ind, :, :, i] = torch.abs(p_ind - f_ind).unsqueeze(
+                    0
+                )
 
         # Normalize the distances
         nearest_pilot_dist_time = pilots_dist_time.min(dim=-1)[0]
@@ -764,6 +738,7 @@ class CGNNOFDM(nn.Module):
         nearest_pilot_dist_time = torch.where(
             std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
         )
+
         nearest_pilot_dist_freq = pilots_dist_freq.min(dim=-1)[0]
         nearest_pilot_dist_freq -= nearest_pilot_dist_freq.mean(dim=2, keepdim=True)
         std_ = nearest_pilot_dist_freq.std(dim=2, keepdim=True)
