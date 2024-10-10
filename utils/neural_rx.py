@@ -361,6 +361,11 @@ class CGNN(nn.Module):
         self._apply_multiloss = apply_multiloss
         self._var_mcs_masking = var_mcs_masking
 
+        # Define in_channels - this should match the number of channels in the input data
+        in_channels = (
+            16  # Replace 16 with the actual number of input channels in your data
+        )
+
         # Initialization for the state
         if self._var_mcs_masking:
             self._s_init = [
