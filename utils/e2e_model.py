@@ -474,6 +474,8 @@ class E2E_Model(nn.Module):
         # Check the result of noise calculation
         print(f"Noise Power Density (no): {no}")
         print("flag2.2")
+        print(type(no))
+        print(type(x))
 
         if self._sys_parameters.channel_type == "AWGN":
             # AWGN channel: pass both x and no
