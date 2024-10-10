@@ -32,21 +32,16 @@ from sionna.nr import TBDecoder, LayerDemapper, PUSCHLSChannelEstimator
 
 
 class SeparableConv2d(nn.Module):
+  
     def __init__(self, in_channels, out_channels, kernel_size, bias=False):
         super(SeparableConv2d, self).__init__()
-
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-
-        padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-
         self.depthwise = nn.Conv2d(
             in_channels,
             in_channels,
             kernel_size=kernel_size,
             groups=in_channels,
             bias=bias,
-            padding=padding,
+            padding=kernel_size // 2,
         )
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
@@ -163,6 +158,7 @@ class StateInit(nn.Module):
         self._output_conv = layer(in_channels, d_s, kernel_size=3)
 
     def forward(self, inputs):
+        print("forward: stateinit flag4")
         y, pe, h_hat = inputs
 
         batch_size = y.shape[0]
@@ -175,15 +171,18 @@ class StateInit(nn.Module):
         pe = flatten_dims(pe, 2, 0)
 
         if h_hat is not None:
+            print("flag5")
             h_hat = flatten_dims(h_hat, 2, 0)
             z = torch.cat([y, pe, h_hat], dim=-1)
         else:
+            print("flag6")
             z = torch.cat([y, pe], dim=-1)
 
         for conv in self._hidden_conv:
             z = conv(z)
         z = self._output_conv(z)
-
+        
+        print("flag7")
         s0 = split_dim(z, [batch_size, num_tx], 0)
 
         return s0
@@ -800,6 +799,7 @@ class LayerDemapper(nn.Module):
 
 class NeuralPUSCHReceiver(nn.Module):
     def __init__(self, sys_parameters, training=False):
+        print("Init: NeuralPUSCHReceiver")
         super().__init__()
 
         self._sys_parameters = sys_parameters
@@ -808,7 +808,7 @@ class NeuralPUSCHReceiver(nn.Module):
         # init transport block enc/decoder
         self._tb_encoders = []
         self._tb_decoders = []
-
+        print("flag1")
         self._num_mcss_supported = len(sys_parameters.mcs_index)
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
@@ -821,7 +821,7 @@ class NeuralPUSCHReceiver(nn.Module):
                     cn_type=sys_parameters.cn_type,
                 )
             )
-
+        print("flag2")
         # Precoding matrix
         if hasattr(sys_parameters.transmitters[0], "_precoder"):
             self._precoding_mat = sys_parameters.transmitters[0]._precoder._w
@@ -832,6 +832,7 @@ class NeuralPUSCHReceiver(nn.Module):
             )
 
         # LS channel estimator
+        print("flag3")
         rg = sys_parameters.transmitters[0]._resource_grid
         pc = sys_parameters.pusch_configs[0][0]
         self._ls_est = PUSCHLSChannelEstimator(
@@ -841,7 +842,7 @@ class NeuralPUSCHReceiver(nn.Module):
             num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
             interpolation_type="nn",
         )
-
+        print("flag4")
         rg_type = rg.build_type_grid()[:, 0].numpy()
         rg_type = torch.from_numpy(rg_type)
         pilot_ind = torch.where(rg_type == 1)
@@ -857,6 +858,7 @@ class NeuralPUSCHReceiver(nn.Module):
         #         for mcs_list_idx in range(self._num_mcss_supported)
         #     ]
         # )
+        print("flag5")
         self._layer_demappers = nn.ModuleList(
             [
                 LayerDemapper(
@@ -866,7 +868,7 @@ class NeuralPUSCHReceiver(nn.Module):
                 for mcs_list_idx in range(self._num_mcss_supported)
             ]
         )
-
+        print("flag6")
         self._neural_rx = CGNNOFDM(
             sys_parameters,
             max_num_tx=sys_parameters.max_num_tx,
