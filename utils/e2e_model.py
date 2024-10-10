@@ -320,9 +320,10 @@ class E2E_Model(nn.Module):
         ebno_db = torch.tensor(ebno_db, dtype=torch.float32)
 
         # Generate transmit signals
-        b, x, mcs_ue_mask, active_dmrs = self._transmitters(
-            batch_size, mcs_arr_eval_idx, mcs_ue_mask, active_dmrs
-        )
+        for transmitter in self._transmitters:
+            b, x, mcs_ue_mask, active_dmrs = transmitter(
+                batch_size, mcs_arr_eval_idx, mcs_ue_mask, active_dmrs
+            )
 
         # Apply channel
         y, h = self._channel([x, ebno_db])
