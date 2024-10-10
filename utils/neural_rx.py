@@ -155,7 +155,7 @@ class StateInit(nn.Module):
 
         #  Output block
         print("flag3")
-        self._output_conv = layer(in_channels, d_s, kernel_size=3, padding=1)
+        self._output_conv = layer(in_channels, d_s, kernel_size=3)
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
