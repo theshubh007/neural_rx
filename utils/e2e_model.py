@@ -317,6 +317,7 @@ class E2E_Model(nn.Module):
         active_dmrs=None,
     ):
         """Defines end-to-end system model in PyTorch."""
+        print("E2E MODEL Forward ")
 
         # Randomly sample num_tx active dmrs ports
         if num_tx is None:
@@ -331,7 +332,7 @@ class E2E_Model(nn.Module):
             active_dmrs = self._active_dmrs_mask(
                 batch_size, num_tx, self._sys_parameters.max_num_tx
             )
-
+        print("flag 1")
         if mcs_ue_mask is None:
             # No mcs-to-ue-mask specified --> evaluate pre-specified MCS only
             assert isinstance(
@@ -344,6 +345,7 @@ class E2E_Model(nn.Module):
             mcs_ue_mask = mcs_ue_mask.unsqueeze(0).repeat(
                 batch_size, self._sys_parameters.max_num_tx, 1
             )
+            print("flag 2")
             mcs_arr_eval = [mcs_arr_eval_idx]
         else:
             # mcs_ue_mask is not None --> we now need to process all MCSs
@@ -351,6 +353,7 @@ class E2E_Model(nn.Module):
                 assert len(mcs_arr_eval_idx) == len(
                     self._sys_parameters.mcs_index
                 ), "mcs_arr_eval_idx list not compatible with length of mcs_index array"
+                print("flag 3")
                 mcs_arr_eval = mcs_arr_eval_idx
             else:
                 # Process in order of mcs_index array
@@ -362,6 +365,7 @@ class E2E_Model(nn.Module):
         ###################################
 
         b = []
+        print("flag 4")
         for idx in range(len(mcs_arr_eval)):
             b.append(
                 self._source(
@@ -377,6 +381,7 @@ class E2E_Model(nn.Module):
 
         # Sample a random slot number and assign its pilots to the transmitter
         if self._training:
+            print("flag 5")
             self._set_transmitter_random_pilots()
 
         # Combine transmit signals from all MCSs
@@ -384,6 +389,7 @@ class E2E_Model(nn.Module):
         x = mcs_ue_mask_t * self._transmitters[mcs_arr_eval[0]](b[0])
 
         for idx in range(1, len(mcs_arr_eval)):
+            print("flag 6")
             mcs_ue_mask_t = mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).float()
             x += mcs_ue_mask_t * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
@@ -394,6 +400,7 @@ class E2E_Model(nn.Module):
         ###################################
         # Channel
         ###################################
+        print("flag 7")
 
         # Apply TX hardware impairments (frequency offset)
         if self._sys_parameters.frequency_offset is not None:
@@ -419,6 +426,7 @@ class E2E_Model(nn.Module):
             no = 10 ** (-ebno_db / 10)
 
         # Apply channel
+        print("flag 8")
         if self._sys_parameters.channel_type == "AWGN":
             y = self._channel(x, no)
             h = torch.ones_like(y)  # Simple AWGN channel
@@ -434,6 +442,7 @@ class E2E_Model(nn.Module):
             "baseline_lmmse_lmmse",
         ):
             b_hat = self._receiver(y, no)
+
             if self._return_tb_status:
                 b_hat, tb_crc_status = b_hat
             else:
@@ -444,7 +453,9 @@ class E2E_Model(nn.Module):
 
         elif self._sys_parameters.system == "nrx":
             if self._training:
+                print("flag 9")
                 losses = self._receiver(y, active_dmrs, b, h, mcs_ue_mask, mcs_arr_eval)
+                print("flag 10")
                 return losses
             else:
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
