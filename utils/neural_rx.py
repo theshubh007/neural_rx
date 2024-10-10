@@ -1047,11 +1047,8 @@ class NeuralPUSCHReceiver(nn.Module):
             no_tf = tf.convert_to_tensor(no_numpy, dtype=tf.float32)
 
             # Call the TensorFlow LS estimator
-            try:
-                h_hat_tf, err_var_tf = self._ls_est([y_tf, no_tf])
-            except tf.errors.InvalidArgumentError as e:
-                print(f"TensorFlow LSChannelEstimator error: {e}")
-                return None, None  # Handle the error appropriately
+
+            h_hat_tf, err_var_tf = self._ls_est([y_tf, no_tf])
 
             # Convert TensorFlow outputs back to NumPy and then PyTorch tensors
             h_hat_numpy = h_hat_tf.numpy()
