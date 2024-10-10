@@ -41,14 +41,14 @@ class SeparableConv2d(nn.Module):
             kernel_size=kernel_size,
             groups=in_channels,
             bias=bias,
-            padding=1,
+            padding=kernel_size // 2,
         )
         self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=bias)
 
     def forward(self, x):
-        out = self.depthwise(x)
-        out = self.pointwise(out)
-        return out
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        return x
 
 
 def to_numpy(input_array):
@@ -131,6 +131,7 @@ class StateInit(nn.Module):
         self, d_s, num_units, layer_type="sepconv", dtype=torch.float32, **kwargs
     ):
         super().__init__(**kwargs)
+        print("Init: StateInit")
 
         # allows for the configuration of multiple layer types
         # one could add custom layers here
@@ -143,13 +144,17 @@ class StateInit(nn.Module):
 
         # Hidden blocks
         self._hidden_conv = nn.ModuleList()
+        print("flag1")
         in_channels = 3  # Assuming input has 3 channels (y, pe, h_hat)
         for n in num_units:
+
             conv = nn.Sequential(layer(in_channels, n, kernel_size=3), nn.ReLU())
+            print("flag2")
             self._hidden_conv.append(conv)
             in_channels = n
 
         #  Output block
+        print("flag3")
         self._output_conv = layer(in_channels, d_s, kernel_size=3, padding=1)
 
     def forward(self, inputs):
