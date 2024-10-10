@@ -514,27 +514,14 @@ class E2E_Model(nn.Module):
         print(self._sys_parameters.system)
 
         if self._sys_parameters.system == "nrx":
-            print("flag3.1")
             if self._training:
-                print("flag3.1.1")
-                # Return losses during training phase
                 losses = self._receiver(y, active_dmrs, b, h, mcs_ue_mask, mcs_arr_eval)
                 return losses
             else:
-                # Return the results during evaluation phase
-                print("flag3.1.2")
-                print(
-                    type(y),
-                    type(active_dmrs),
-                    type(b),
-                    type(h),
-                    type(mcs_ue_mask),
-                    type(mcs_arr_eval),
-                )
-                print(no)
-                print("flag3.1.3")
+                print(f"Noise: {no}")
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
                     (y, active_dmrs),
+                    no,
                     mcs_arr_eval=mcs_arr_eval,
                     mcs_ue_mask_eval=mcs_ue_mask,
                 )

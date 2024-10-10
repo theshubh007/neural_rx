@@ -1027,6 +1027,7 @@ class NeuralPUSCHReceiver(nn.Module):
         print("NeuralPUSCHReceiver estimate_channel")
         print("y", y.shape)
         print("num_tx", num_tx)
+        import tensorflow as tf
 
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
@@ -1092,7 +1093,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
         return h
 
-    def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+    def forward(self, no, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         """
         Apply neural receiver.
         """
@@ -1140,7 +1141,7 @@ class NeuralPUSCHReceiver(nn.Module):
             num_tx = active_tx.shape[1]
 
             print(f"Number of transmit antennas (num_tx): {num_tx}")
-            h_hat = self.estimate_channel(y, num_tx)
+            h_hat = self.estimate_channel(y, num_tx, no)
             print(h_hat.shape, h_hat)
 
             # Call the neural receiver and get llr and h_hat_refined
