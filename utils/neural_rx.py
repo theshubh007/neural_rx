@@ -26,7 +26,7 @@ from sionna.ofdm import ResourceGridDemapper
 from sionna.nr import (
     TBDecoder,
     LayerDemapper,
-    LSChannelEstimator,
+    PUSCHLSChannelEstimator,
 )
 
 
@@ -977,14 +977,13 @@ class NeuralPUSCHReceiver(nn.Module):
         # LS channel estimator
         rg = sys_parameters.transmitters[0]._resource_grid
         pc = sys_parameters.pusch_configs[0][0]
-        self._ls_est = LSChannelEstimator(rg, interpolation_type="lin_time_avg")
-        # self._ls_est = PUSCHLSChannelEstimator(
-        #     resource_grid=rg,
-        #     dmrs_length=pc.dmrs.length,
-        #     dmrs_additional_position=pc.dmrs.additional_position,
-        #     num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
-        #     interpolation_type="nn",
-        # )
+        self._ls_est = PUSCHLSChannelEstimator(
+            resource_grid=rg,
+            dmrs_length=pc.dmrs.length,
+            dmrs_additional_position=pc.dmrs.additional_position,
+            num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
+            interpolation_type="nn",
+        )
 
         rg_type = rg.build_type_grid()[:, 0].numpy()
         rg_type_torch = torch.tensor(rg_type)
@@ -1017,32 +1016,39 @@ class NeuralPUSCHReceiver(nn.Module):
             dtype=sys_parameters.nrx_dtype,
         )
 
-    def estimate_channel(self, y, num_tx, no):
+    def estimate_channel(self, y, num_tx):
 
         print("NeuralPUSCHReceiver estimate_channel")
         print("y", y.shape)
         print("num_tx", num_tx)
 
-        if self.sys_parameters.initial_chest == "ls":
-            if self.sys_parameters.mask_pilots:
+        if self._sys_parameters.initial_chest == "ls":
+            if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
 
-            # Perform LS channel estimation
-            h_hat, err_var = self.ls_est(
-                y, no
-            )  # [batch_size, num_rx, num_rx_ant, num_tx, ..., num_effective_subcarriers]
+            # Dummy value for N0 as it is not used anyway.
+            import tensorflow as tf
 
-            # Reshaping h_hat to match PyTorch conventions: [batch_size, num_tx, num_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
-            h_hat = h_hat[:, 0, :, :num_tx, 0]  # Adjust the dimensions as per your need
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)  # Transpose to match PyTorch ordering
-            h_hat = torch.cat(
-                [h_hat.real, h_hat.imag], dim=-1
-            )  # Concatenate real and imaginary parts
+            y_numpy = to_numpy(y)
+            y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
+            # Call the TensorFlow LS estimator
+            h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
+            # h_hat, _ = self._ls_est([y, 1e-1])
+            h_hat_numpy = to_numpy(h_hat_tf)
+            h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
 
-        elif self.sys_parameters.initial_chest is None:
+            # Reshaping to the expected shape
+            # h_hat shape: [batch_size, num_tx, num_effective_subcarriers, num_ofdm_symbols, 2*num_rx_ant]
+            h_hat = h_hat[:, 0, :, :num_tx, 0]
+            h_hat = h_hat.permute(0, 2, 4, 3, 1)
+            h_hat = torch.cat([torch.real(h_hat), torch.imag(h_hat)], dim=-1)
+
+        elif self._sys_parameters.initial_chest is None:
             h_hat = None
+
+        return h_hat
 
     def preprocess_channel_ground_truth(self, h):
         # h: [batch_size, num_rx, num_rx_ant, num_tx, num_tx_ant, num_ofdm_symbols, num_effective_subcarriers]
@@ -1072,15 +1078,16 @@ class NeuralPUSCHReceiver(nn.Module):
 
         return h
 
-    def forward(self, inputs, no, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+    def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         """
         Apply neural receiver.
         """
+        self._training = False
         print("NeuralPUSCHReceiver forward")
-
+        print(self._training)
         if self._training:
             # In training mode, we expect 5 inputs
-            y, active_tx, b, h, mcs_ue_mask, no = inputs  # Now no is included in inputs
+            y, active_tx, b, h, mcs_ue_mask = inputs
 
             # Re-encode bits in training mode to generate labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
@@ -1096,7 +1103,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
-            h_hat = self.estimate_channel(y, num_tx, no)
+            h_hat = self.estimate_channel(y, num_tx)
 
             # Reshaping `h` to the expected shape and apply precoding matrices
             if h is not None:
@@ -1109,20 +1116,18 @@ class NeuralPUSCHReceiver(nn.Module):
             return losses
 
         else:
-            # In evaluation mode, we expect 3 inputs (y, active_tx, no)
+            # In evaluation, we expect only 2 inputs
             print("NeuralPUSCHReceiver forward else")
-            y, active_tx, no = inputs  # Now no is unpacked as part of inputs
-            print(f"Noise: {no}")
-            print(f"y shape: {y.shape}")
-            print(f"active_tx shape: {active_tx.shape}")
+            y, active_tx = inputs
+            print(y.shape, y)
+            print(active_tx.shape, active_tx)
 
             # Initial channel estimation
             num_tx = active_tx.shape[1]
-            print(f"Number of transmit antennas (num_tx): {num_tx}")
 
-            # Pass `no` to the channel estimator
-            h_hat = self.estimate_channel(y, num_tx, no)
-            print(f"h_hat shape: {h_hat.shape}")
+            print(f"Number of transmit antennas (num_tx): {num_tx}")
+            h_hat = self.estimate_channel(y, num_tx)
+            print(h_hat.shape, h_hat)
 
             # Call the neural receiver and get llr and h_hat_refined
             llr, h_hat_refined = self._neural_rx(

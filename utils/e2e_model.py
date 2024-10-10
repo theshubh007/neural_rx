@@ -531,9 +531,10 @@ class E2E_Model(nn.Module):
                     type(mcs_ue_mask),
                     type(mcs_arr_eval),
                 )
+                print(no)
                 print("flag3.1.3")
                 b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
-                    (y, active_dmrs, no),
+                    (y, active_dmrs),
                     mcs_arr_eval=mcs_arr_eval,
                     mcs_ue_mask_eval=mcs_ue_mask,
                 )
