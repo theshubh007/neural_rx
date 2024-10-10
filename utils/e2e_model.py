@@ -382,6 +382,7 @@ class E2E_Model(nn.Module):
         # Combine transmit signals from all MCSs
         x = torch.zeros_like(b[0], dtype=torch.complex64)
         for idx in range(len(mcs_arr_eval)):
+            print("Flag1.0")
             _mcs_ue_mask = (
                 mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).expand_as(x)
             )
