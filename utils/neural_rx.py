@@ -1072,7 +1072,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
         return h
 
-    def forward(self, inputs,, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
+    def forward(self, inputs, mcs_arr_eval=[0], mcs_ue_mask_eval=None):
         """
         Apply neural receiver.
         """
@@ -1112,7 +1112,7 @@ class NeuralPUSCHReceiver(nn.Module):
         else:
             # In evaluation, we expect only 2 inputs
             print("NeuralPUSCHReceiver forward else")
-            y, active_tx,b,h,no = inputs
+            y, active_tx, b, h, no = inputs
             print(y.shape, y)
             print(active_tx.shape, active_tx)
 
