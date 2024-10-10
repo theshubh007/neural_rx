@@ -119,7 +119,6 @@ class AggregateUserStates(nn.Module):
         dtype=torch.float32,
         **kwargs,
     ):
-        print("AggregateUserStates initialized")
         super().__init__()
 
         if layer_type == "dense":
@@ -127,22 +126,16 @@ class AggregateUserStates(nn.Module):
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
+        # Ensure in_features is passed as an integer
+        if not isinstance(in_features, int):
+            raise TypeError(f"in_features must be an int but got {type(in_features)}")
+
         # Initialize hidden layers with both in_features and out_features
         self._hidden_layers = nn.ModuleList()
-        print("flag0")
         for n in num_units:
-            # Print the types of in_features and n to debug
-            print(f"in_features: {in_features}, type: {type(in_features)}")
-            print(f"n: {n}, type: {type(n)}")
-
-            # Check if in_features and n are integers
-            if not isinstance(in_features, int):
-                raise TypeError(
-                    f"in_features must be an int but got {type(in_features)}"
-                )
+            # Check if both in_features and n are integers
             if not isinstance(n, int):
-                raise TypeError(f"n (out_features) must be an int but got {type(n)}")
-
+                raise TypeError(f"out_features (n) must be an int but got {type(n)}")
             self._hidden_layers.append(layer(in_features, n))
             in_features = n  # Update in_features for the next layer
 
