@@ -667,11 +667,15 @@ class CGNNOFDM(nn.Module):
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
-        pilots_torch = torch.tensor(pilots)  # Convert to PyTorch tensor
+        # Ensure pilots_torch has the same dtype as torch.zeros
+        pilots_torch = torch.tensor(
+            pilots, dtype=torch.float32
+        )  # Ensure it is a float tensor
 
-        pilots_only = torch.zeros(rg_type_torch.shape).scatter_(
-            0, pilot_ind[0], pilots_torch
-        )  # Use pilot_ind[0]
+        # Ensure that torch.zeros has the same dtype as pilots_torch
+        pilots_only = torch.zeros(
+            rg_type_torch.shape, dtype=pilots_torch.dtype
+        ).scatter_(0, pilot_ind[0], pilots_torch)
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
 
         # Sort the pilots according to which TX they are allocated
