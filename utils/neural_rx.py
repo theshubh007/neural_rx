@@ -663,6 +663,7 @@ class CGNNOFDM(nn.Module):
         ##############################################
         rg_type = self._rg.build_type_grid()[:, 0].numpy()  # One stream only
         print(f"Shape of rg_type: {rg_type.shape}")
+        print(f"rg_type: {rg_type}")
         rg_type_torch = torch.tensor(rg_type)  # Convert to PyTorch tensor
         print(f"Shape of rg_type_torch: {rg_type_torch.shape}")
         pilot_ind = torch.where(rg_type_torch == 1)
@@ -670,11 +671,16 @@ class CGNNOFDM(nn.Module):
         pilots = flatten_last_dims(
             self._rg.pilot_pattern.pilots, 3
         ).numpy()  # Ensure this is NumPy
+        print(f"Pilot pattern content: {pilots}")
         # Convert to PyTorch and flatten for dimension compatibility
         pilots_torch = torch.tensor(pilots, dtype=torch.float32)
 
         # Ensure that the pilots_only tensor matches the shape of the resource grid
         pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
+        pilots_only = torch.zeros_like(rg_type_torch, dtype=torch.float32)
+        # Dummy example where we manually place pilots at position [0,0] and [1,1]
+        pilots_only[0, 0, 0] = 1.0
+        pilots_only[1, 1, 1] = 1.0
 
         # Make sure pilot_ind[0] has the correct shape for scatter
         if pilot_ind[0].dim() == 1:
