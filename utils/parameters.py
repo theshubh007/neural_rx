@@ -206,6 +206,7 @@ class Parameters:
             self.channel_type = "TDL-B100"
 
         if self.channel_type in ("UMi", "UMa"):
+            print("Using UMi/UMa channel model.")
             if self.num_rx_antennas == 1:
                 print("Using vertical polarization for single antenna setup.")
                 num_cols_per_panel = 1
@@ -237,6 +238,7 @@ class Parameters:
             )
 
             if self.channel_type == "UMi":
+                print("Using UMi channel model.")
                 self.channel_model = UMi(
                     carrier_frequency=self.carrier_frequency,
                     o2i_model="low",
@@ -246,11 +248,11 @@ class Parameters:
                     enable_pathloss=True,  # Enable path loss
                     enable_shadow_fading=True,  # Enable shadow fading
                 )
-                # Manually initialize _lsp attribute
-                self.channel_model._lsp = {
-                    "path_loss": np.zeros(self.num_rx_antennas),
-                    "shadow_fading": np.ones(self.num_rx_antennas),
-                }
+                # # Manually initialize _lsp attribute
+                # self.channel_model._lsp = {
+                #     "path_loss": np.zeros(self.num_rx_antennas),
+                #     "shadow_fading": np.ones(self.num_rx_antennas),
+                # }
             else:  # UMa
                 self.channel_model = UMa(
                     carrier_frequency=self.carrier_frequency,
@@ -261,11 +263,11 @@ class Parameters:
                     enable_pathloss=True,  # Enable path loss
                     enable_shadow_fading=True,  # Enable shadow fading
                 )
-                # Manually initialize _lsp attribute
-                self.channel_model._lsp = {
-                    "path_loss": np.zeros(self.num_rx_antennas),
-                    "shadow_fading": np.ones(self.num_rx_antennas),
-                }
+                # # Manually initialize _lsp attribute
+                # self.channel_model._lsp = {
+                #     "path_loss": np.zeros(self.num_rx_antennas),
+                #     "shadow_fading": np.ones(self.num_rx_antennas),
+                # }
             self.channel = OFDMChannel(
                 channel_model=self.channel_model,
                 resource_grid=self.transmitters[0]._resource_grid,
