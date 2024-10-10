@@ -372,10 +372,13 @@ class E2E_Model(nn.Module):
                 torch.zeros([batch_size, self._sys_parameters.max_num_tx, tb_size])
             )
 
+        print("flag1.1")
+
         # Sample a random slot number and assign its pilots to the transmitter
         if self._training:
             self._set_transmitter_random_pilots()
 
+        print("flag1.2")
         # Combine transmit signals from all MCSs
         x = torch.zeros_like(b[0], dtype=torch.complex64)
         for idx in range(len(mcs_arr_eval)):
@@ -385,6 +388,7 @@ class E2E_Model(nn.Module):
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
         # Mask non-active DMRS ports by multiplying with 0
+        print("flag1.3")
         active_tx_mask = active_dmrs.unsqueeze(-1).expand_as(x)
         x = x * active_tx_mask
 
