@@ -614,6 +614,7 @@ class CGNNOFDM(nn.Module):
         layer_type_conv="sepconv",
         layer_type_readout="dense",
         nrx_dtype=torch.float32,
+        debug=False,  # Debugging flag for verbose output
         **kwargs,
     ):
         super().__init__()
@@ -623,37 +624,38 @@ class CGNNOFDM(nn.Module):
         self._layer_demappers = layer_demappers
         self._sys_parameters = sys_parameters
         self._nrx_dtype = nrx_dtype
+        self._debug = debug
 
+        # Number of MCS supported (Modulation and Coding Scheme)
         self._num_mcss_supported = len(sys_parameters.mcs_index)
 
+        # Resource grid initialization
         self._rg = sys_parameters.transmitters[0]._resource_grid
 
         if self._sys_parameters.mask_pilots:
             print("Masking pilots for pilotless communications.")
 
-        self._mcs_var_mcs_masking = False
-        if hasattr(self._sys_parameters, "mcs_var_mcs_masking"):
-            self._mcs_var_mcs_masking = self._sys_parameters.mcs_var_mcs_masking
-            print("Var-MCS NRX with masking.")
-        elif len(sys_parameters.mcs_index) > 1:
-            print("Var-MCS NRX with MCS-specific IO layers.")
-        else:
-            pass  # Single-MCS NRX
+        # Variable MCS Masking
+        self._mcs_var_mcs_masking = (
+            hasattr(self._sys_parameters, "mcs_var_mcs_masking")
+            and self._sys_parameters.mcs_var_mcs_masking
+        )
 
-        num_bits_per_symbol = []
-        for mcs_list_idx in range(self._num_mcss_supported):
-            num_bits_per_symbol.append(
-                sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol
-            )
+        if self._debug:
+            print(f"Var-MCS Masking: {self._mcs_var_mcs_masking}")
+
+        # Initialize bits per symbol for MCS schemes
+        num_bits_per_symbol = [
+            sys_parameters.pusch_configs[mcs_list_idx][0].tb.num_bits_per_symbol
+            for mcs_list_idx in range(self._num_mcss_supported)
+        ]
 
         # Number of receive antennas
         num_rx_ant = sys_parameters.num_rx_antennas
 
-        ####################################################
-        # Core neural receiver
-        ####################################################
+        # Initialize the Core Neural Receiver
         self._cgnn = CGNN(
-            num_bits_per_symbol,  # is a list
+            num_bits_per_symbol,
             num_rx_ant,
             num_it,
             d_s,
@@ -669,90 +671,89 @@ class CGNNOFDM(nn.Module):
             dtype=nrx_dtype,
         )
 
-        ###################################################
-        # Resource grid demapper to extract the
-        # data-carrying resource elements from the
-        # resource grid
-        ###################################################
+        # Resource grid demapper
         self._rg_demapper = ResourceGridDemapper(self._rg, sys_parameters.sm)
 
-        #################################################
-        # Instantiate the loss function if training
-        #################################################
+        # Loss function initialization
         if training:
-            # Loss function
             self._bce = nn.BCEWithLogitsLoss(reduction="none")
-            # Loss function
             self._mse = nn.MSELoss(reduction="none")
 
-        ###############################################
-        # Pre-compute positional encoding.
-        # Positional encoding consists in the distance
-        # to the nearest pilot in time and frequency.
-        ##############################################
-        rg_type = self._rg.build_type_grid()[:, 0].numpy()  # One stream only
-        print(f"Shape of rg_type: {rg_type.shape}")
-        print(f"rg_type: {rg_type}")  # Check the full content
+        # Precompute positional encoding for pilots
+        self._precompute_pilot_positional_encoding()
+
+    def _precompute_pilot_positional_encoding(self):
+        """
+        Precomputes the positional encoding based on the distance to the nearest pilot
+        in both time and frequency, and handles pilot insertion safely.
+        """
+        # Extract resource grid type (data, pilot, guard, DC)
+        rg_type = self._rg.build_type_grid()[:, 0].numpy()  # Consider only one stream
+        if self._debug:
+            print(f"Resource grid type shape: {rg_type.shape}")
 
         rg_type_torch = torch.tensor(rg_type)  # Convert to PyTorch tensor
-        pilot_ind = torch.where(rg_type_torch == 1)  # Should give indices of pilots
-        print(f"Shape of pilot_ind: {pilot_ind[0].shape}")  # Debugging pilot indices
 
-        pilots = flatten_last_dims(
-            self._rg.pilot_pattern.pilots, 3
-        ).numpy()  # Ensure this is NumPy
-        pilots_torch = torch.tensor(
-            pilots, dtype=torch.float32
-        )  # Convert to PyTorch tensor
-        print(
-            f"Pilot pattern content: {pilots_torch.shape}"
-        )  # Validate the pilot pattern content
+        # Get pilot indices (where value is 1)
+        pilot_ind = torch.where(rg_type_torch == 1)
 
-        # Initialize the pilots_only tensor
+        # Ensure valid pilot indices (within bounds of the resource grid)
+        valid_pilot_indices = (pilot_ind[0] < self._rg.fft_size) & (pilot_ind[0] >= 0)
+        pilot_ind = pilot_ind[0][valid_pilot_indices]
+
+        if self._debug:
+            print(f"Valid pilot indices shape: {pilot_ind.shape}")
+
+        # Convert pilots to PyTorch tensor
+        pilots = flatten_last_dims(self._rg.pilot_pattern.pilots, 3).numpy()
+        pilots_torch = torch.tensor(pilots, dtype=torch.float32)
+
+        # Initialize an empty pilot tensor of the same shape as rg_type
         pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
 
-        # Manually check if pilots can be inserted into the grid
-        if pilot_ind[0].dim() == 1:
-            pilot_ind_reshaped = (
-                pilot_ind[0].unsqueeze(1).expand(-1, 2)
-            )  # Adjust to match pilots_only shape
-
-        # Scatter pilots into the correct locations in pilots_only
-        for i, p_ind in enumerate(pilot_ind_reshaped):
-            if p_ind[0] < pilots_only.shape[0] and p_ind[1] < pilots_only.shape[1]:
-                pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
+        # Insert pilots into the grid without out-of-bounds errors
+        for i, p_ind in enumerate(pilot_ind):
+            if p_ind < pilots_only.shape[0]:  # Check if index is valid
+                pilots_only[p_ind] = pilots_torch[i]
             else:
-                print(f"Skipping out-of-bounds index: {p_ind}")
+                if self._debug:
+                    print(f"Skipping out-of-bounds pilot index: {p_ind}")
 
-        # Continue with the rest of your code
+        # Scatter pilots into the correct locations
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
-        print(f"Shape of pilots_only: {pilots_only.shape}")
-        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
 
-        # Initialize pilots_dist_time and pilots_dist_freq with correct dimensions
+        # Precompute distances to the nearest pilots in time and frequency
+        self._compute_pilot_distances(pilot_ind)
+
+    def _compute_pilot_distances(self, pilot_ind):
+        """
+        Computes the distances to the nearest pilot in both time and frequency dimensions.
+        """
+        # Time and frequency indices
+        t_ind = torch.arange(self._rg.num_ofdm_symbols)
+        f_ind = torch.arange(self._rg.fft_size)
+
+        # Initialize distance matrices for time and frequency
         pilots_dist_time = torch.zeros(
             (
-                max_num_tx,
+                self._max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                len(pilot_ind[0]),  # Using correct pilot indices length
+                len(pilot_ind),
             )
         )
         pilots_dist_freq = torch.zeros(
             (
-                max_num_tx,
+                self._max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                len(pilot_ind[0]),  # Using correct pilot indices length
+                len(pilot_ind),
             )
         )
 
-        # Compute distance to nearest pilot in time and frequency
-        t_ind = torch.arange(self._rg.num_ofdm_symbols)
-        f_ind = torch.arange(self._rg.fft_size)
-
-        for tx_ind in range(max_num_tx):
-            for i, p_ind in enumerate(pilot_ind[0]):  # Adjust indexing
+        # Calculate the distance for each transmitter
+        for tx_ind in range(self._max_num_tx):
+            for i, p_ind in enumerate(pilot_ind):
                 pilots_dist_time[tx_ind, :, :, i] = torch.abs(p_ind - t_ind).unsqueeze(
                     1
                 )
@@ -760,25 +761,29 @@ class CGNNOFDM(nn.Module):
                     0
                 )
 
-        # Normalize the distances
+        # Normalize the distances for stability
         nearest_pilot_dist_time = pilots_dist_time.min(dim=-1)[0]
         nearest_pilot_dist_time -= nearest_pilot_dist_time.mean(dim=1, keepdim=True)
-        std_ = nearest_pilot_dist_time.std(dim=1, keepdim=True)
+        std_time = nearest_pilot_dist_time.std(dim=1, keepdim=True)
         nearest_pilot_dist_time = torch.where(
-            std_ > 0.0, nearest_pilot_dist_time / std_, nearest_pilot_dist_time
+            std_time > 0.0, nearest_pilot_dist_time / std_time, nearest_pilot_dist_time
         )
 
         nearest_pilot_dist_freq = pilots_dist_freq.min(dim=-1)[0]
         nearest_pilot_dist_freq -= nearest_pilot_dist_freq.mean(dim=2, keepdim=True)
-        std_ = nearest_pilot_dist_freq.std(dim=2, keepdim=True)
+        std_freq = nearest_pilot_dist_freq.std(dim=2, keepdim=True)
         nearest_pilot_dist_freq = torch.where(
-            std_ > 0.0, nearest_pilot_dist_freq / std_, nearest_pilot_dist_freq
+            std_freq > 0.0, nearest_pilot_dist_freq / std_freq, nearest_pilot_dist_freq
         )
 
+        # Combine the distances and set it as an instance variable
         nearest_pilot_dist = torch.stack(
             [nearest_pilot_dist_time, nearest_pilot_dist_freq], dim=-1
         )
         self._nearest_pilot_dist = nearest_pilot_dist.permute(0, 2, 1, 3)
+
+        if self._debug:
+            print(f"Nearest pilot distance shape: {self._nearest_pilot_dist.shape}")
 
     @property
     def num_it(self):
