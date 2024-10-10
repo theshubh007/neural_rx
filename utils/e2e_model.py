@@ -449,6 +449,7 @@ class E2E_Model(nn.Module):
 
             # Convert them back to PyTorch tensors
             num_pilots = torch.tensor(num_pilots, dtype=torch.float32)
+            print("Flag2.2")
             num_res = torch.tensor(num_res, dtype=torch.float32)
 
             # Perform the PyTorch operation for adjusting ebno_db
