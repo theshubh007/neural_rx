@@ -938,14 +938,14 @@ class NeuralPUSCHReceiver(nn.Module):
         )
 
     def estimate_channel(self, y, num_tx):
-        import tensorflow as tf
-
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
             # Convert PyTorch tensor `y` to a NumPy array, then to a TensorFlow tensor
+            import tensorflow as tf
+
             y_numpy = y.cpu().numpy()  # Convert PyTorch tensor to NumPy array
             y_tf = tf.convert_to_tensor(
                 y_numpy, dtype=tf.complex64
