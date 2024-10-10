@@ -394,6 +394,12 @@ class E2E_Model(nn.Module):
                 f"Shape of transmitter output for MCS {mcs_arr_eval[idx]}: {self._transmitters[mcs_arr_eval[idx]](b[idx]).shape}"
             )
             print("Flag1.2.2")
+
+            # Ensure compatibility with PyTorch by adjusting the tensor size appropriately
+            # You might need to replace TensorFlow's TBEncoder calls here with PyTorch equivalents
+            # E.g., converting tensor shapes or broadcasting using PyTorch methods
+
+            # Add transmitter output to x with proper broadcasting
             x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
         # Mask non-active DMRS ports by multiplying with 0
