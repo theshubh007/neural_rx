@@ -1015,7 +1015,8 @@ class NeuralPUSCHReceiver(nn.Module):
     def estimate_channel(self, y, num_tx):
         # y has shape [batch_size, num_rx, num_rx_ant, num_ofdm_symbols, num_subcarriers]
         print("NeuralPUSCHReceiver estimate_channel")
-        print(y.shape, y)
+        print("y", y.shape)
+        print("num_tx", num_tx)
 
         if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
