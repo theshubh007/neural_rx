@@ -39,15 +39,21 @@ class StateInit(nn.Module):
     """
 
     def __init__(
-        self, d_s, num_units, layer_type="sepconv", dtype=torch.float32, **kwargs
+        self,
+        d_s,
+        num_units,
+        in_channels,
+        layer_type="sepconv",
+        dtype=torch.float32,
+        **kwargs
     ):
         super().__init__()
 
-        # allows for the configuration of multiple layer types
+        # Allows for the configuration of multiple layer types
         if layer_type == "sepconv":
             layer = (
                 nn.Conv2d
-            )  # PyTorch doesn't have SeparableConv2D natively; use Conv2d as a placeholder
+            )  # PyTorch doesn't have SeparableConv2D natively; using Conv2d
         elif layer_type == "conv":
             layer = nn.Conv2d
         else:
@@ -56,11 +62,13 @@ class StateInit(nn.Module):
         # Hidden blocks
         self._hidden_conv = nn.ModuleList()
         for n in num_units:
-            conv = layer(n, kernel_size=(3, 3), padding="same", dtype=dtype)
+            # Using padding=1 to simulate 'same' padding with 3x3 kernel
+            conv = layer(in_channels, n, kernel_size=(3, 3), padding=1)
             self._hidden_conv.append(conv)
+            in_channels = n  # Update in_channels for the next layer
 
         # Output block
-        self._output_conv = layer(d_s, kernel_size=(3, 3), padding="same", dtype=dtype)
+        self._output_conv = layer(in_channels, d_s, kernel_size=(3, 3), padding=1)
 
     def forward(self, inputs):
         y, pe, h_hat = inputs
