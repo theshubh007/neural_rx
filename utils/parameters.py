@@ -237,7 +237,7 @@ class Parameters:
                 carrier_frequency=self.carrier_frequency,
             )
 
-            if self.channel_type == "UMi":
+            if self.channel_type == "UMiiiii":
                 print("Using UMi channel model.")
                 self.channel_model = UMi(
                     carrier_frequency=self.carrier_frequency,
@@ -339,7 +339,7 @@ class Parameters:
                 norm_channel=self.channel_norm,
             )
 
-        elif self.channel_type == "AWGN":
+        elif self.channel_type == "AWGN" or self.channel_type == "UMi":
             self.channel = AWGN()
 
         elif self.channel_type == "Dataset":
