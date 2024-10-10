@@ -955,14 +955,18 @@ class NeuralPUSCHReceiver(nn.Module):
             return losses
 
         else:
+            print("Evaluation mode")
             y, active_tx = inputs
             num_tx = active_tx.shape[1]
+            print("num_tx: ", num_tx, type(num_tx))
             h_hat = self.estimate_channel(y, num_tx)
+            print("h_hat: ", h_hat, type(h_hat))
             llr, h_hat_refined = self._neural_rx(
                 (y, h_hat, active_tx),
                 [mcs_arr_eval[0]],
                 mcs_ue_mask_eval=mcs_ue_mask_eval,
             )
+            print("llr: ", llr, type(llr))
             b_hat, tb_crc_status = self._tb_decoders[mcs_arr_eval[0]](llr)
             return b_hat, h_hat_refined, h_hat, tb_crc_status
 
