@@ -433,15 +433,15 @@ class E2E_Model(nn.Module):
         if self._sys_parameters.ebno:
             print("flag2.1")
             tx = self._sys_parameters.transmitters[0]
-            # Assuming they are already integers
-            # Convert num_pilots and num_res to PyTorch tensors
-            num_pilots = torch.tensor(
+
+            # Assuming num_pilot_symbols and num_resource_elements are scalar values
+            num_pilots = (
                 tx._resource_grid.num_pilot_symbols
-            )  # Convert to PyTorch tensor
-            num_res = torch.tensor(
+            )  # Keep them as scalar values
+            num_res = (
                 tx._resource_grid.num_resource_elements
-            )  # Convert to PyTorch tensor
-            print("flag2.2")
+            )  # Keep them as scalar values
+
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
 
@@ -450,7 +450,6 @@ class E2E_Model(nn.Module):
 
             # Manually perform ebnodb2no logic
             ebno = torch.pow(10.0, ebno_db / 10.0)
-            print(f"Eb/No: {ebno}")
             num_bits_per_symbol = self._transmitters[
                 mcs_arr_eval_idx[0]
             ]._num_bits_per_symbol
