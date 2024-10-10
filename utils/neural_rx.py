@@ -670,14 +670,9 @@ class CGNNOFDM(nn.Module):
         pilots_torch = torch.tensor(pilots, dtype=torch.float32)
 
         # Initialize the pilots_only tensor
-        pilots_only = torch.zeros_like(rg_type_torch, dtype=pilots_torch.dtype)
+        pilots_only = torch.zeros(rg_type_torch.shape, dtype=pilots_torch.dtype)
 
-        # Make sure pilot_ind[0] has the correct shape for scatter
-        if pilot_ind[0].dim() == 1:
-            pilot_ind_reshaped = pilot_ind[0].unsqueeze(1).expand(-1, 1)
-        else:
-            pilot_ind_reshaped = pilot_ind[0]
-
+        # Make sure pilot_ind is reshaped correctly and has valid dimensions
         pilot_ind_reshaped = pilot_ind[0].view(
             -1, 2
         )  # Assuming a 2D pilot index (time, freq)
@@ -689,18 +684,22 @@ class CGNNOFDM(nn.Module):
             else:
                 print(f"Skipping out-of-bounds index: {p_ind}")
 
-        # Continue with the rest of your code
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
-        print(f"Shape of pilots_only: {pilots_only.shape}")
-        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
 
-        # Sort the pilots according to which TX they are allocated
-        pilot_ind_sorted = [[] for _ in range(max_num_tx)]
-        for p_ind in zip(*pilot_ind):
-            tx_ind = p_ind[0]
-            re_ind = p_ind[1:]
-            pilot_ind_sorted[tx_ind].append(re_ind)
-        pilot_ind_sorted = torch.tensor(pilot_ind_sorted, dtype=torch.long)
+        # Ensure that the pilot_ind_sorted has valid indices
+        if len(pilot_ind[0]) > 0:  # Make sure there are valid pilots
+            pilot_ind_sorted = [[] for _ in range(max_num_tx)]
+            for p_ind in zip(*pilot_ind):
+                tx_ind = p_ind[0]
+                re_ind = p_ind[1:]
+                pilot_ind_sorted[tx_ind].append(re_ind)
+            pilot_ind_sorted = torch.tensor(pilot_ind_sorted, dtype=torch.long)
+        else:
+            raise ValueError("No valid pilots found!")
+
+        # Check the shape of pilot_ind_sorted
+        if pilot_ind_sorted.shape[1] == 0:
+            raise ValueError("pilot_ind_sorted has zero pilots!")
 
         # Distance to the nearest pilot in time and frequency
         pilots_dist_time = torch.zeros(
@@ -708,7 +707,7 @@ class CGNNOFDM(nn.Module):
                 max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                pilot_ind_sorted.shape[1],
+                pilot_ind_sorted.shape[1],  # Ensure this is non-zero
             )
         )
         pilots_dist_freq = torch.zeros(
@@ -716,7 +715,7 @@ class CGNNOFDM(nn.Module):
                 max_num_tx,
                 self._rg.num_ofdm_symbols,
                 self._rg.fft_size,
-                pilot_ind_sorted.shape[1],
+                pilot_ind_sorted.shape[1],  # Ensure this is non-zero
             )
         )
 
