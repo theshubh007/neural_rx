@@ -670,6 +670,7 @@ class CGNNOFDM(nn.Module):
         # Ensure pilots_torch has the same dtype as torch.zeros
         # Ensure pilots_torch has the same dtype as torch.zeros
         # Ensure pilots_torch has the same dtype as torch.zeros
+        # Ensure pilots_torch has the same dtype as torch.zeros
         pilots_torch = torch.tensor(
             pilots, dtype=torch.float32
         )  # Ensure it is a float tensor
@@ -677,16 +678,27 @@ class CGNNOFDM(nn.Module):
         # Ensure that torch.zeros has the same dtype as pilots_torch
         pilots_only = torch.zeros(rg_type_torch.shape, dtype=pilots_torch.dtype)
 
-        # Check dimensions before scatter
-        print(f"Shape of pilots_only: {pilots_only.shape}")
-        print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
-
         # Reshape the index tensor to match pilots_only
-        # Assuming pilots_only has more than 1 dimension, you need to expand the index tensor
-        pilot_ind_reshaped = pilot_ind[0].unsqueeze(1).expand_as(pilots_torch)
+        # We reshape pilot_ind to have 3D indices
+        # Assume that pilot_ind[0] represents indices for the 3D tensor
+        pilot_ind_reshaped = torch.stack(
+            torch.meshgrid(
+                torch.arange(2),  # First dimension size (max_num_tx)
+                torch.arange(14),  # Second dimension size (num_ofdm_symbols)
+                torch.arange(48),  # Third dimension size (fft_size)
+            ),
+            dim=-1,
+        ).reshape(-1, 3)
 
-        # Use scatter_ with correctly shaped index tensor
-        pilots_only = pilots_only.scatter_(0, pilot_ind_reshaped, pilots_torch)
+        # Use scatter_ to place the pilots into the pilots_only tensor
+        for idx in range(len(pilot_ind_reshaped)):
+            pilots_only[
+                pilot_ind_reshaped[idx][0],
+                pilot_ind_reshaped[idx][1],
+                pilot_ind_reshaped[idx][2],
+            ] = pilots_torch[idx]
+
+        # Continue with the rest of your code
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
         print(f"Shape of pilots_only: {pilots_only.shape}")
         print(f"Shape of pilot_ind[0]: {pilot_ind[0].shape}")
