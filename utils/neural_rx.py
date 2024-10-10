@@ -111,7 +111,13 @@ class AggregateUserStates(nn.Module):
     """
 
     def __init__(
-        self, d_s, num_units, layer_type="dense", dtype=torch.float32, **kwargs
+        self,
+        d_s,
+        num_units,
+        in_features,
+        layer_type="dense",
+        dtype=torch.float32,
+        **kwargs
     ):
         super().__init__()
 
@@ -120,8 +126,14 @@ class AggregateUserStates(nn.Module):
         else:
             raise NotImplementedError("Unknown layer_type selected.")
 
-        self._hidden_layers = nn.ModuleList([layer(n, dtype=dtype) for n in num_units])
-        self._output_layer = layer(d_s, dtype=dtype)
+        # Initialize hidden layers with both in_features and out_features
+        self._hidden_layers = nn.ModuleList()
+        for n in num_units:
+            self._hidden_layers.append(layer(in_features, n))
+            in_features = n  # Update in_features for the next layer
+
+        # Output layer
+        self._output_layer = layer(in_features, d_s)
 
     def forward(self, inputs):
         s, active_tx = inputs
