@@ -366,14 +366,21 @@ class E2E_Model(nn.Module):
 
         b = []
         print("flag 4")
+
         for idx in range(len(mcs_arr_eval)):
+            tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size
+            if tb_size is None:
+                raise ValueError(
+                    f"TB Size for MCS index {mcs_arr_eval[idx]} is None. Check transmitter initialization."
+                )
+
             b.append(
                 self._source(
                     torch.Size(
                         [
                             batch_size,
                             self._sys_parameters.max_num_tx,
-                            self._transmitters[mcs_arr_eval[idx]]._tb_size,
+                            tb_size,
                         ]
                     )
                 )
