@@ -161,6 +161,7 @@ class E2E_Model(nn.Module):
         self._training = training
         self._return_tb_status = return_tb_status
         self._mcs_arr_eval_idx = mcs_arr_eval_idx
+        self.num_rx_antennas = sys_parameters.num_rx_antennas  # Add this line
 
         ###################################
         # Transmitter
