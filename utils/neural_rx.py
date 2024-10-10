@@ -232,7 +232,7 @@ class UpdateState(nn.Module):
         super().__init__()
 
         if layer_type == "sepconv":
-            layer = nn.SeparableConv2d
+            layer = SeparableConv2d
         elif layer_type == "conv":
             layer = nn.Conv2d
         else:
