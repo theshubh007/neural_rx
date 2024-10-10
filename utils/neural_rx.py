@@ -809,7 +809,8 @@ class NeuralPUSCHReceiver(nn.Module):
             interpolation_type="nn",
         )
 
-        rg_type = rg.build_type_grid()[:, 0]
+        rg_type = rg.build_type_grid()[:, 0].numpy()
+        rg_type = torch.from_numpy(rg_type)
         pilot_ind = torch.where(rg_type == 1)
         self._pilot_ind = np.array(pilot_ind)
 
