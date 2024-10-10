@@ -369,11 +369,17 @@ class E2E_Model(nn.Module):
 
         for idx in range(len(mcs_arr_eval)):
             tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
+            batch_size_int = int(batch_size)  # Ensure it's an integer
+            max_num_tx_int = int(
+                self._sys_parameters.max_num_tx
+            )  # Ensure it's an integer
+            tb_size_int = int(tb_size)  # Ensure it's an integer
+
             print(
-                f"batch_size: {batch_size}, max_num_tx: {self._sys_parameters.max_num_tx}, tb_size: {tb_size}"
+                f"batch_size: {batch_size_int}, max_num_tx: {max_num_tx_int}, tb_size: {tb_size_int}"
             )
 
-            if tb_size is None:
+            if tb_size_int is None:
                 raise ValueError(
                     f"TB Size for MCS index {mcs_arr_eval[idx]} is None. Check transmitter initialization."
                 )
@@ -382,9 +388,9 @@ class E2E_Model(nn.Module):
                 self._source(
                     torch.Size(
                         [
-                            batch_size,
-                            self._sys_parameters.max_num_tx,
-                            tb_size,
+                            batch_size_int,
+                            max_num_tx_int,
+                            tb_size_int,
                         ]
                     )
                 )
