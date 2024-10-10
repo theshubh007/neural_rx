@@ -678,9 +678,16 @@ class CGNNOFDM(nn.Module):
         else:
             pilot_ind_reshaped = pilot_ind[0]
 
+        pilot_ind_reshaped = pilot_ind[0].view(
+            -1, 2
+        )  # Assuming a 2D pilot index (time, freq)
+
         # Scatter pilots into the appropriate locations in pilots_only
         for i, p_ind in enumerate(pilot_ind_reshaped):
-            pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
+            if p_ind[0] < pilots_only.shape[0] and p_ind[1] < pilots_only.shape[1]:
+                pilots_only[p_ind[0], p_ind[1]] = pilots_torch[i]
+            else:
+                print(f"Skipping out-of-bounds index: {p_ind}")
 
         # Continue with the rest of your code
         pilot_ind = torch.where(torch.abs(pilots_only) > 1e-3)
