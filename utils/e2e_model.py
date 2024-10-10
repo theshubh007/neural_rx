@@ -476,6 +476,10 @@ class E2E_Model(nn.Module):
         print("flag2.2")
         print(type(no))
         print(type(x))
+        x = to_numpy(x)
+        tf_tensor = tf.convert_to_tensor(x, dtype=tf.float32)
+        x = tf.complex(tf_tensor, tf.zeros_like(tf_tensor))
+        print(type(x))
 
         if self._sys_parameters.channel_type == "AWGN":
             # AWGN channel: pass both x and no
