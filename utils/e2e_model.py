@@ -16,6 +16,7 @@ import numpy as np
 from sionna.utils import BinarySource, expand_to_rank
 from .baseline_rx import BaselineReceiver
 from .neural_rx import NeuralPUSCHReceiver
+from sionna.channel import AWGN
 
 
 def to_numpy(input_array):
@@ -480,6 +481,7 @@ class E2E_Model(nn.Module):
         ):
             # AWGN channel: pass both x and no
             print("flag2.3")
+            self._channel = AWGN()
             y = self._channel([x, no])
             h = torch.ones_like(y)  # Simple AWGN channel with no channel response
         else:
