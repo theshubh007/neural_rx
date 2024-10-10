@@ -954,47 +954,25 @@ class NeuralPUSCHReceiver(nn.Module):
 
             import tensorflow as tf
 
-            # Extract relevant system parameters
-            num_rx_ant = (
-                self._sys_parameters.num_rx_antennas
-            )  # Number of receiver antennas
-            rg = self._sys_parameters.transmitters[0]._resource_grid
-            num_ofdm_symbols = rg.num_ofdm_symbols  # Number of OFDM symbols
-            fft_size = rg.fft_size  # FFT size
-            batch_size = y.shape[0]  # First dimension is the batch size
-
-            # Debugging info for the extracted dimensions
-            print(f"batch_size: {batch_size}")
-            print(f"num_rx_ant: {num_rx_ant}")
-            print(f"num_ofdm_symbols: {num_ofdm_symbols}")
-            print(f"fft_size: {fft_size}")
-            print(f"num_tx: {num_tx}")
-
-            # Calculate the expected number of elements
-            expected_elements = batch_size * num_rx_ant * num_ofdm_symbols * fft_size
-            actual_elements = y.numel()
-
-            # Debugging the number of elements
-            print(f"Expected number of elements: {expected_elements}")
-            print(f"Actual number of elements: {actual_elements}")
-
-            # Check if the number of elements match
-            if expected_elements != actual_elements:
-                # Handle the mismatch with concrete logic
-                raise ValueError(
-                    f"Mismatch in the number of elements: expected {expected_elements}, got {actual_elements}"
-                )
+            # Debugging info for the shape of input tensor `y`
+            print("Original y shape:", y.shape)
 
             # Convert PyTorch tensor `y` to TensorFlow tensor
             y_numpy = y.cpu().numpy()
             y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
 
-            # Reshape `y_tf` to match the expected shape for the LS estimator
-            y_tf = tf.reshape(
-                y_tf, [batch_size, num_rx_ant, num_ofdm_symbols, fft_size]
-            )
+            # Total number of elements in the input tensor
+            total_elements = y.numel()
 
-            # Debug: Print shape of `y_tf` and ensure indices are valid
+            # Directly reshape based on total elements
+            # Infer the last dimension (fft_size) dynamically
+            inferred_shape = [-1, self._sys_parameters.num_rx_antennas, self._sys_parameters.transmitters[0]._resource_grid.num_ofdm_symbols]
+            inferred_shape.append(total_elements // np.prod(inferred_shape))
+
+            # Reshape `y_tf` based on inferred shape
+            y_tf = tf.reshape(y_tf, inferred_shape)
+
+            # Debugging info for the reshaped `y_tf`
             print("Reshaped y_tf shape:", y_tf.shape)
 
             # Perform the channel estimation with TensorFlow
