@@ -943,42 +943,34 @@ class NeuralPUSCHReceiver(nn.Module):
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
                 )
-            # Convert PyTorch tensor `y` to a NumPy array, then to a TensorFlow tensor
+
             import tensorflow as tf
 
-            y_numpy = y.cpu().numpy()  # Convert PyTorch tensor to NumPy array
-            y_tf = tf.convert_to_tensor(
-                y_numpy, dtype=tf.complex64
-            )  # Convert to TensorFlow tensor
+            # Convert PyTorch tensor `y` to TensorFlow tensor
+            y_numpy = y.cpu().numpy()
+            y_tf = tf.convert_to_tensor(y_numpy, dtype=tf.complex64)
 
-            # Debug: Print shape of `y_tf` and pilot indices
+            # Debug: Print shape of `y_tf` and ensure indices are valid
             print("y_tf shape:", y_tf.shape)
             print("num_tx:", num_tx)
 
             # Perform the channel estimation with TensorFlow
             h_hat_tf, _ = self._ls_est([y_tf, 1e-1])
 
-            # Convert the result back to NumPy and then to PyTorch
-            h_hat_numpy = h_hat_tf.numpy()  # Convert TensorFlow tensor to NumPy array
-            h_hat = torch.from_numpy(h_hat_numpy).to(
-                y.dtype
-            )  # Convert back to PyTorch tensor
+            # Ensure the estimated tensor is valid
+            if h_hat_tf.shape[0] > 0 and h_hat_tf.shape[2] >= num_tx:
+                # Convert back to PyTorch
+                h_hat_numpy = h_hat_tf.numpy()
+                h_hat = torch.from_numpy(h_hat_numpy).to(y.dtype)
 
-            # Debug: Check dimensions of `h_hat` after estimation
-            print("h_hat shape before processing:", h_hat.shape)
-
-            # Perform the necessary PyTorch operations on h_hat
-            h_hat = h_hat[:, 0, :, :num_tx, 0]
-            h_hat = h_hat.permute(0, 2, 4, 3, 1)
-            h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
-
-            # Debug: Check final shape of `h_hat`
-            print("h_hat shape after processing:", h_hat.shape)
-
-        elif self._sys_parameters.initial_chest is None:
-            h_hat = None
-
-        return h_hat
+                # Reshape and permute as needed
+                h_hat = h_hat[:, 0, :, :num_tx, 0]
+                h_hat = h_hat.permute(0, 2, 4, 3, 1)
+                h_hat = torch.cat([h_hat.real, h_hat.imag], dim=-1)
+                return h_hat
+            else:
+                raise ValueError(f"Invalid shape for h_hat_tf: {h_hat_tf.shape}")
+        return None
 
     def preprocess_channel_ground_truth(self, h):
         h = h.squeeze(1)
