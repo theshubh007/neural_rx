@@ -1068,10 +1068,10 @@ class NeuralPUSCHReceiver(nn.Module):
         Apply neural receiver.
         """
         if self.training:
+            # In training mode, we expect 5 inputs
             y, active_tx, b, h, mcs_ue_mask = inputs
 
             # Re-encode bits in training mode to generate labels
-            # Avoids the need for post-FEC bits as labels
             if len(mcs_arr_eval) == 1 and not isinstance(b, list):
                 b = [b]  # generate new list if b is not provided as list
 
