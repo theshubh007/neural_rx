@@ -444,6 +444,8 @@ class E2E_Model(nn.Module):
 
             print(f"Number of pilots: {num_pilots}")
             print(f"Number of resource elements: {num_res}")
+            print(type(num_pilots))
+            print(type(num_res))
 
             # Perform the PyTorch operation for adjusting ebno_db
             ebno_db = ebno_db - 10.0 * torch.log10(1.0 - num_pilots / num_res)
