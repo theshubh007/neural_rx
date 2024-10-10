@@ -306,189 +306,116 @@ class E2E_Model(nn.Module):
         for mcs_list_idx in range(len(self._sys_parameters.mcs_index)):
             self._transmitters[mcs_list_idx].pilot_pattern.pilots = pilots
 
-    def forward(
-        self,
-        batch_size,
-        ebno_db,
-        num_tx=None,
-        output_nrx_h_hat=False,
-        mcs_arr_eval_idx=None,
-        mcs_ue_mask=None,
-        active_dmrs=None,
-    ):
-        """Defines end-to-end system model in PyTorch."""
-        print("E2E MODEL Forward ")
+    def forward(self, batch_size, ebno_db, num_tx=None, output_nrx_h_hat=False,
+            mcs_arr_eval_idx=None, mcs_ue_mask=None, active_dmrs=None):
+    """Defines end-to-end system model."""
 
-        # Randomly sample num_tx active dmrs ports
-        if num_tx is None:
-            num_tx = self._sys_parameters.max_num_tx
+    # Randomly sample num_tx active dmrs ports
+    if num_tx is None:
+        num_tx = self._sys_parameters.max_num_tx
 
-        # If nothing is specified, select one pre-specified MCS
-        if mcs_arr_eval_idx is None:
-            mcs_arr_eval_idx = self._mcs_arr_eval_idx
+    # If nothing is specified, select one pre-specified MCS
+    if mcs_arr_eval_idx is None:
+        mcs_arr_eval_idx = self._mcs_arr_eval_idx
 
-        # Generate active DMRS mask (if not specified)
-        if active_dmrs is None:
-            active_dmrs = self._active_dmrs_mask(
-                batch_size, num_tx, self._sys_parameters.max_num_tx
-            )
-        print("flag 1")
-        if mcs_ue_mask is None:
-            # No mcs-to-ue-mask specified --> evaluate pre-specified MCS only
-            assert isinstance(
-                mcs_arr_eval_idx, int
-            ), "Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer"
+    # Generate active dmrs mask (if not specified)
+    if active_dmrs is None:
+        active_dmrs = self._active_dmrs_mask(
+            batch_size,
+            num_tx,
+            self._sys_parameters.max_num_tx
+        )
+
+    # Initialize mcs_ue_mask
+    if mcs_ue_mask is None:
+        # Pre-specified MCS
+        if isinstance(mcs_arr_eval_idx, int):
             mcs_ue_mask = torch.nn.functional.one_hot(
-                torch.tensor(mcs_arr_eval_idx),
-                num_classes=len(self._sys_parameters.mcs_index),
-            ).float()
-            mcs_ue_mask = mcs_ue_mask.unsqueeze(0).repeat(
-                batch_size, self._sys_parameters.max_num_tx, 1
-            )
-            print("flag 2")
+                torch.tensor([mcs_arr_eval_idx]),
+                num_classes=len(self._sys_parameters.mcs_index)
+            ).expand(batch_size, self._sys_parameters.max_num_tx, -1).float()
             mcs_arr_eval = [mcs_arr_eval_idx]
         else:
-            # mcs_ue_mask is not None --> we now need to process all MCSs
-            if isinstance(mcs_arr_eval_idx, (list, tuple)):
-                assert len(mcs_arr_eval_idx) == len(
-                    self._sys_parameters.mcs_index
-                ), "mcs_arr_eval_idx list not compatible with length of mcs_index array"
-                print("flag 3")
-                mcs_arr_eval = mcs_arr_eval_idx
-            else:
-                # Process in order of mcs_index array
-                mcs_arr_eval = list(range(len(self._sys_parameters.mcs_index)))
+            raise ValueError("Pre-defined MCS UE mask only works if mcs_arr_eval_idx is an integer.")
+    else:
+        # Process all MCSs
+        if isinstance(mcs_arr_eval_idx, (list, tuple)):
+            mcs_arr_eval = mcs_arr_eval_idx
+        else:
+            mcs_arr_eval = list(range(len(self._sys_parameters.mcs_index)))
 
-        ###################################
-        # Transmitters
-        # One transmitter for each supported MCS
-        ###################################
+    ###################################
+    # Transmitters
+    # One transmitter for each supported MCS
+    ###################################
 
-        b = []
-        print("flag 4")
-
-        for idx in range(len(mcs_arr_eval)):
-            tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
-            batch_size_int = int(batch_size)  # Ensure it's an integer
-            max_num_tx_int = int(
-                self._sys_parameters.max_num_tx
-            )  # Ensure it's an integer
-            tb_size_int = int(tb_size)  # Ensure it's an integer
-
-            print(
-                f"batch_size: {batch_size_int}, max_num_tx: {max_num_tx_int}, tb_size: {tb_size_int}"
+    b = []
+    for idx in range(len(mcs_arr_eval)):
+        tb_size = self._transmitters[mcs_arr_eval[idx]]._tb_size or 1
+        if tb_size is None:
+            raise ValueError(f"TB Size for MCS index {mcs_arr_eval[idx]} is None.")
+        b.append(
+            self._source(
+                torch.Size([
+                    batch_size,
+                    self._sys_parameters.max_num_tx,
+                    tb_size,
+                ])
             )
+        )
 
-            if tb_size_int is None:
-                raise ValueError(
-                    f"TB Size for MCS index {mcs_arr_eval[idx]} is None. Check transmitter initialization."
-                )
+    # Sample a random slot number and assign its pilots to the transmitter
+    if self._training:
+        self._set_transmitter_random_pilots()
 
-            b.append(
-                self._source(
-                    torch.Size(
-                        [
-                            batch_size_int,
-                            max_num_tx_int,
-                            tb_size_int,
-                        ]
-                    )
-                )
-            )
+    # Combine transmit signals from all MCSs
+    x = torch.zeros_like(b[0], dtype=torch.complex64)
+    for idx in range(len(mcs_arr_eval)):
+        _mcs_ue_mask = mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).expand_as(x)
+        x += _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
 
-        # Sample a random slot number and assign its pilots to the transmitter
+    # Mask non-active DMRS ports by multiplying with 0
+    active_tx_mask = active_dmrs.unsqueeze(-1).expand_as(x)
+    x = x * active_tx_mask
+
+    ###################################
+    # Channel
+    ###################################
+
+    if self._sys_parameters.ebno:
+        tx = self._sys_parameters.transmitters[0]
+        num_pilots = tx._resource_grid.num_pilot_symbols
+        num_res = tx._resource_grid.num_resource_elements
+        ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
+        no = ebnodb2no(
+            ebno_db,
+            self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
+            self._transmitters[mcs_arr_eval[0]]._target_coderate,
+            self._transmitters[mcs_arr_eval[0]]._resource_grid,
+        )
+    else:
+        no = torch.pow(10.0, -ebno_db / 10)
+
+    # Apply channel
+    if self._sys_parameters.channel_type == "AWGN":
+        y = self._channel(x, no)
+        h = torch.ones_like(y)
+    else:
+        y, h = self._channel(x, no)
+
+    ###################################
+    # Receiver
+    ###################################
+
+    if self._sys_parameters.system == "nrx":
         if self._training:
-            print("flag 5")
-            self._set_transmitter_random_pilots()
-
-        # Combine transmit signals from all MCSs
-        mcs_ue_mask_t = mcs_ue_mask[:, :, mcs_arr_eval[0]].unsqueeze(-1).float()
-        x = mcs_ue_mask_t * self._transmitters[mcs_arr_eval[0]](b[0])
-
-        for idx in range(1, len(mcs_arr_eval)):
-            print("flag 6")
-            mcs_ue_mask_t = mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1).float()
-            x += mcs_ue_mask_t * self._transmitters[mcs_arr_eval[idx]](b[idx])
-
-        # Mask non-active DMRS ports by multiplying with 0
-        a_tx = active_dmrs.unsqueeze(-1).expand_as(x)
-        x = x * a_tx.float()
-
-        ###################################
-        # Channel
-        ###################################
-        print("flag 7")
-
-        # Apply TX hardware impairments (frequency offset)
-        if self._sys_parameters.frequency_offset is not None:
-            x = self._sys_parameters.frequency_offset(x)
-
-        # Rate adjusted SNR
-        if self._sys_parameters.ebno:
-            if self._sys_parameters.mask_pilots:
-                tx = self._sys_parameters.transmitters[0]
-                num_pilots = tx._resource_grid.num_pilot_symbols
-                num_res = tx._resource_grid.num_resource_elements
-                ebno_db -= 10.0 * torch.log10(1.0 - num_pilots / num_res)
-
-            # Translate Eb/No [dB] to N0 for the first evaluated MCS
-            no = ebnodb2no(
-                ebno_db,
-                self._transmitters[mcs_arr_eval[0]]._num_bits_per_symbol,
-                self._transmitters[mcs_arr_eval[0]]._target_coderate,
-                self._transmitters[mcs_arr_eval[0]]._resource_grid,
+            losses = self._receiver(y, active_dmrs, b, h, mcs_ue_mask, mcs_arr_eval)
+            return losses
+        else:
+            b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
+                (y, active_dmrs), mcs_arr_eval, mcs_ue_mask_eval=mcs_ue_mask
             )
-        else:
-            # ebno_db is actually SNR when self._sys_parameters.ebno == False
-            no = 10 ** (-ebno_db / 10)
-
-        # Apply channel
-        print("flag 8")
-        if self._sys_parameters.channel_type == "AWGN":
-            y = self._channel(x, no)
-            h = torch.ones_like(y)  # Simple AWGN channel
-        else:
-            y, h = self._channel(x, no)
-
-        ###################################
-        # Receiver
-        ###################################
-
-        if self._sys_parameters.system in (
-            "baseline_lmmse_kbest",
-            "baseline_lmmse_lmmse",
-        ):
-            b_hat = self._receiver(y, no)
-
-            if self._return_tb_status:
-                b_hat, tb_crc_status = b_hat
-            else:
-                tb_crc_status = None
-            return self._mask_active_dmrs(
-                b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
-            )
-
-        elif self._sys_parameters.system == "nrx":
-            if self._training:
-                print("flag 9")
-                losses = self._receiver(y, active_dmrs, b, h, mcs_ue_mask, mcs_arr_eval)
-                print("flag 10")
-                return losses
-            else:
-                b_hat, h_hat_refined, h_hat, tb_crc_status = self._receiver(
-                    y, active_dmrs, mcs_arr_eval, mcs_ue_mask
-                )
-                b, b_hat, tb_crc_status = self._mask_active_dmrs(
-                    b[0], b_hat, num_tx, active_dmrs, mcs_arr_eval[0], tb_crc_status
-                )
-
-                if output_nrx_h_hat:
-                    return b, b_hat, h_hat_refined, h_hat, tb_crc_status
-                else:
-                    return b, b_hat
-
-        else:
-            raise ValueError("Unknown system selected!")
+            return b, b_hat, h_hat_refined, h_hat
 
     # def forward(
     #     self,
