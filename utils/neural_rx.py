@@ -238,12 +238,6 @@ class UpdateState(nn.Module):
 
 
 class CGNNIt(nn.Module):
-    r"""
-    Implements an iteration of the CGNN detector.
-
-    Consists of two stages: State aggregation followed by state update.
-    """
-
     def __init__(
         self,
         d_s,
@@ -255,27 +249,28 @@ class CGNNIt(nn.Module):
         **kwargs,
     ):
         super().__init__()
-
-        # Layer for state aggregation
-        self._state_aggreg = AggregateUserStates(
-            d_s, num_units_agg, layer_type_dense, dtype=dtype
-        )
-
-        # State update
-        self._state_update = UpdateState(
-            d_s, num_units_state_update, layer_type_conv, dtype=dtype
-        )
+        self._state_aggreg = None
+        self._d_s = d_s
+        self._num_units_agg = num_units_agg
+        self._layer_type_dense = layer_type_dense
+        self._dtype = dtype
 
     def forward(self, inputs):
-        s, pe, active_tx = inputs
+        # Pass a dummy input through to calculate in_features dynamically
+        s, active_tx = inputs
+        in_features = s.shape[-1]  # Assuming last dimension is the input size
 
-        # User state aggregation
-        a = self._state_aggreg((s, active_tx))
-
-        # State update
-        s_new = self._state_update((s, a, pe))
-
-        return s_new
+        if self._state_aggreg is None:
+            # Initialize state_aggreg with inferred in_features
+            self._state_aggreg = AggregateUserStates(
+                self._d_s,
+                self._num_units_agg,
+                in_features,
+                self._layer_type_dense,
+                dtype=self._dtype,
+            )
+        # Forward pass through state_aggreg
+        return self._state_aggreg((s, active_tx))
 
 
 class ReadoutLLRs(nn.Module):
