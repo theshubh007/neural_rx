@@ -476,7 +476,7 @@ class E2E_Model(nn.Module):
 
         if (
             self._sys_parameters.channel_type == "AWGN"
-            or self._sys_parameters.channel_type == "UMi"
+            
         ):
             # AWGN channel: pass both x and no
             print("flag2.3")
