@@ -1484,13 +1484,24 @@ class NeuralPUSCHReceiver(nn.Module):
                     "Cannot use initial channel estimator if pilots are masked."
                 )
 
+            # Extract dimensions from y
+            batch_size, num_rx_ant, flattened_ofdm_subcarriers = y.shape
             # Convert PyTorch tensor `y` to NumPy for compatibility with MyLSChannelEstimatorNP
             y_numpy = y.cpu().numpy()  # Assuming `y` is a PyTorch tensor
 
-            # Handle `no` shape mismatch, expand if necessary
-            no = (
-                torch.ones((batch_size, num_rx, num_rx_ant), dtype=torch.float32) * 1e-4
-            )  # Default value for noise variance
+            # Expand noise variance `no` if necessary to match the shape [batch_size, num_rx_ant]
+            if isinstance(no, torch.Tensor):
+                if no.ndim == 0:  # Scalar noise
+                    no = no * torch.ones((batch_size, num_rx_ant), dtype=torch.float32)
+                elif no.ndim == 1:  # Shape [batch_size]
+                    no = no[:, None].expand(batch_size, num_rx_ant)
+                elif no.ndim == 2:  # Shape [batch_size, num_rx_ant]
+                    pass  # Already in the correct shape
+            else:
+                # If `no` is scalar, expand it to [batch_size, num_rx_ant]
+                no = torch.ones((batch_size, num_rx_ant), dtype=torch.float32) * no
+
+            print("no shape after expanding: ", no.shape)
             no_numpy = (
                 no.cpu().numpy() if isinstance(no, torch.Tensor) else no
             )  # Handle `no` in case it's a tensor

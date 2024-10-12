@@ -511,6 +511,11 @@ class E2E_Model(nn.Module):
         y = torch.from_numpy(y)
         print("y shape: ", y.shape)
         print("y value: ", y)
+#         The shape of y is [10, 2, 1256], which can be interpreted as follows:
+# 10: The batch size. This means that there are 10 independent transmission batches or examples being processed at once.
+# 2: The number of receive antennas (num_rx_ant), meaning the system is likely using 2 receive antennas.
+# 1256: The flattened representation of the signal, which corresponds to the number of OFDM symbols and subcarriers for each antenna. This is the total number of subcarriers across all the OFDM symbols received by the antennas.
+
         h = to_numpy(h)
         h = torch.from_numpy(h)
         print(self._sys_parameters.system)
