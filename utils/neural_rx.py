@@ -1478,7 +1478,7 @@ class NeuralPUSCHReceiver(nn.Module):
         print("no", no.shape)
         print("self._sys_parameters.initial_chest", self._sys_parameters.initial_chest)
 
-        if self._sys_parameters.initial_chest == None:
+        if self._sys_parameters.initial_chest == 'ls':
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
