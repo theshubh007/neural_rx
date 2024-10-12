@@ -965,23 +965,12 @@ class RemoveNulledSubcarriers:
         result = np.take(inputs, self._sc_ind, axis=-1)  # (64, 1, 1, 1, 16, 1, 64)
         return result
 
+import os
 
 class NearestNeighborInterpolator:
     # pylint: disable=line-too-long
     r"""NearestNeighborInterpolator(pilot_pattern)
 
-    Nearest-neighbor channel estimate interpolation on a resource grid.
-
-    This class assigns to each element of an OFDM resource grid one of
-    ``num_pilots`` provided channel estimates and error
-    variances according to the nearest neighbor method. It is assumed
-    that the measurements were taken at the nonzero positions of a
-    :class:`~sionna.ofdm.PilotPattern`.
-
-    The figure below shows how four channel estimates are interpolated
-    accross a resource grid. Grey fields indicate measurement positions
-    while the colored regions show which resource elements are assigned
-    to the same measurement value.
 
     .. image:: ../figures/nearest_neighbor_interpolation.png
 
@@ -1060,6 +1049,9 @@ class NearestNeighborInterpolator:
         self._gather_ind = np.reshape(
             gather_ind, mask_shape
         )  # _gather_ind: (1, 2, 14, 64)
+
+        # Create 'data/' directory if it doesn't exist
+        os.makedirs("data", exist_ok=True)
         np.save("data/inter_gather_ind.npy", self._gather_ind)
 
     def mygather(self, inputs, method="tf"):
