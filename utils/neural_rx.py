@@ -1549,7 +1549,7 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Use the numpy-based LS estimator
             h_hat_numpy, err_var_numpy = self._ls_est_np([y_numpy, no_numpy])
-
+            print("estimated channel")
             # Convert the results back to PyTorch tensors
             h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
             err_var = torch.from_numpy(err_var_numpy).to(y.device)
