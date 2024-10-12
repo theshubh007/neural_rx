@@ -509,6 +509,8 @@ class E2E_Model(nn.Module):
         print("flag3")
         y = to_numpy(y)
         y = torch.from_numpy(y)
+        print("y shape: ", y.shape)
+        print("y value: ", y)
         h = to_numpy(h)
         h = torch.from_numpy(h)
         print(self._sys_parameters.system)
