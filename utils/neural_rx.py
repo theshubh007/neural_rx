@@ -1484,8 +1484,13 @@ class NeuralPUSCHReceiver(nn.Module):
                     "Cannot use initial channel estimator if pilots are masked."
                 )
 
+            
             # Convert PyTorch tensor `y` to NumPy for compatibility with MyLSChannelEstimatorNP
             y_numpy = y.cpu().numpy()  # Assuming `y` is a PyTorch tensor
+
+            # Handle `no` shape mismatch, expand if necessary
+            if no.shape == ():  # If `no` is a scalar
+                no = torch.tensor([no], dtype=torch.float32).to(y.device)
             no_numpy = (
                 no.cpu().numpy() if isinstance(no, torch.Tensor) else no
             )  # Handle `no` in case it's a tensor
@@ -1495,6 +1500,7 @@ class NeuralPUSCHReceiver(nn.Module):
             print(y_numpy.shape, no_numpy.shape)
             h_hat_numpy, err_var_numpy = self._ls_est_np([y_numpy, no_numpy])
             print("estimated channel")
+
             # Convert the results back to PyTorch tensors
             h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
             err_var = torch.from_numpy(err_var_numpy).to(y.device)
