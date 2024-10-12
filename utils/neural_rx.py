@@ -912,7 +912,9 @@ class RemoveNulledSubcarriers:
         result = np.take(inputs, self._sc_ind, axis=-1)  # (64, 1, 1, 1, 16, 1, 64)
         return result
 
+
 import os
+
 
 class NearestNeighborInterpolator:
     # pylint: disable=line-too-long
@@ -1473,6 +1475,8 @@ class NeuralPUSCHReceiver(nn.Module):
         print("NeuralPUSCHReceiver estimate_channel")
         print("y", y.shape)
         print("num_tx", num_tx)
+        print("no", no.shape)
+        print("self._sys_parameters.initial_chest", self._sys_parameters.initial_chest)
 
         if self._sys_parameters.initial_chest == None:
             if self._sys_parameters.mask_pilots:
