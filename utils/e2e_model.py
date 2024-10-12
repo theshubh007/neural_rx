@@ -288,24 +288,25 @@ class E2E_Model(nn.Module):
             print(f"Transmitted bits for MCS {idx} (b[{idx}]):", b[idx], b[idx].shape)
 
         # Combine transmit signals from all MCSs
-        _mcs_ue_mask = (
-            mcs_ue_mask[:, :, mcs_arr_eval[0]]
-            .unsqueeze(-1)
-            .expand(-1, -1, -1, 5)
-            .to(torch.complex64)
-        )
-        x = _mcs_ue_mask * self._transmitters[mcs_arr_eval[0]](b[0])
-        print("Initial transmit signal (x):", x, x.shape)
+        _mcs_ue_mask = mcs_ue_mask[:, :, mcs_arr_eval[0]].unsqueeze(
+            -1
+        )  # Ensure proper dimension before expanding
+        print(f"Initial _mcs_ue_mask shape before expanding: {_mcs_ue_mask.shape}")
+
+        # Correct the expansion to match the transmit signal
+        x = _mcs_ue_mask.expand(
+            -1, -1, -1, self._transmitters[mcs_arr_eval[0]](b[0]).shape[-1]
+        ).to(torch.complex64)
+        print(f"Initial transmit signal (x): {x.shape}")
 
         for idx in range(1, len(mcs_arr_eval)):
-            _mcs_ue_mask = (
-                mcs_ue_mask[:, :, mcs_arr_eval[idx]]
-                .unsqueeze(-1)
-                .expand(-1, -1, -1, 5)
-                .to(torch.complex64)
-            )
-            x = x + _mcs_ue_mask * self._transmitters[mcs_arr_eval[idx]](b[idx])
-            print(f"Updated transmit signal after MCS {idx} (x):", x, x.shape)
+            _mcs_ue_mask = mcs_ue_mask[:, :, mcs_arr_eval[idx]].unsqueeze(-1)
+            print(f"_mcs_ue_mask for MCS {idx} before expanding: {_mcs_ue_mask.shape}")
+
+            x = x + _mcs_ue_mask.expand(
+                -1, -1, -1, self._transmitters[mcs_arr_eval[idx]](b[idx]).shape[-1]
+            ).to(torch.complex64)
+            print(f"Updated transmit signal after MCS {idx} (x): {x.shape}")
 
         # Mask non-active DMRS ports by multiplying with 0
         a_tx = active_dmrs.unsqueeze(-1).expand_as(x).to(torch.complex64)
