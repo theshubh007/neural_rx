@@ -1478,7 +1478,7 @@ class NeuralPUSCHReceiver(nn.Module):
         print("no", no.shape)
         print("self._sys_parameters.initial_chest", self._sys_parameters.initial_chest)
 
-        if self._sys_parameters.initial_chest == 'ls':
+        if self._sys_parameters.initial_chest == "ls":
             if self._sys_parameters.mask_pilots:
                 raise ValueError(
                     "Cannot use initial channel estimator if pilots are masked."
@@ -1492,7 +1492,8 @@ class NeuralPUSCHReceiver(nn.Module):
 
             # Use the numpy-based LS estimator
             print(self.rg, self._pilots)
-            h_hat_numpy, err_var_numpy = self._ls_est_np()
+            print(y_numpy.shape, no_numpy.shape)
+            h_hat_numpy, err_var_numpy = self._ls_est_np([y_numpy, no_numpy])
             print("estimated channel")
             # Convert the results back to PyTorch tensors
             h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
