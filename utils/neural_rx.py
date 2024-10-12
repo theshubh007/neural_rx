@@ -1426,13 +1426,7 @@ class NeuralPUSCHReceiver(nn.Module):
         pc = sys_parameters.pusch_configs[0][0]
         # Initialize the numpy-based LS channel estimator
         self._ls_est_np = MyLSChannelEstimatorNP(self.rg, interpolation_type="nn")
-        # self._ls_est = PUSCHLSChannelEstimator(
-        #     resource_grid=rg,
-        #     dmrs_length=pc.dmrs.length,
-        #     dmrs_additional_position=pc.dmrs.additional_position,
-        #     num_cdm_groups_without_data=pc.dmrs.num_cdm_groups_without_data,
-        #     interpolation_type="nn",
-        # )
+       
 
         rg_type = rg.build_type_grid()[:, 0].numpy()
         rg_type_torch = torch.tensor(rg_type)
@@ -1507,7 +1501,7 @@ class NeuralPUSCHReceiver(nn.Module):
             )  # Handle `no` in case it's a tensor
 
             # Use the numpy-based LS estimator
-            print(self.rg, self._pilots)
+            print(self._pilots)
             print(y_numpy.shape, no_numpy.shape)
             h_hat_numpy, err_var_numpy = self._ls_est_np([y_numpy, no_numpy])
             print("estimated channel")
