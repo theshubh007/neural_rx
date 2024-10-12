@@ -956,11 +956,11 @@ class RemoveNulledSubcarriers:
     """
 
     def __init__(self, resource_grid):
-        self._sc_ind = resource_grid.effective_subcarrier_ind
+        # Convert the `range` object to a numpy array
+        self._sc_ind = np.array(resource_grid.effective_subcarrier_ind)
         print("sc_ind shape:", self._sc_ind.shape)  # (64,) [5,6,7,8...]
 
     def __call__(self, inputs):  # inputs (64, 1, 1, 1, 16, 1, 76)
-        # return tf.gather(inputs, self._sc_ind, axis=-1)
         # Assuming 'inputs' is a NumPy array and '_sc_ind' is an integer or array of indices
         result = np.take(inputs, self._sc_ind, axis=-1)  # (64, 1, 1, 1, 16, 1, 64)
         return result
