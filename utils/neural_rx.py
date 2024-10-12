@@ -881,59 +881,6 @@ class CGNNOFDM(nn.Module):
             return llrs[-1][0], h_hats[-1]
 
 
-import torch
-
-
-class ManualChannelEstimator:
-    def __init__(self, pilots):
-        """
-        Initialize the manual channel estimator with known pilot symbols.
-
-        Args:
-            pilots (torch.Tensor): The pilot symbols for the transmitted signals.
-                                   Shape should be [num_tx, num_subcarriers].
-        """
-        self.pilots = (
-            pilots  # Known transmitted pilots, shape: [num_tx, num_subcarriers]
-        )
-
-    def estimate_channel(self, y, num_tx):
-        """
-        Estimate the channel using the Least Squares (LS) method.
-
-        Args:
-            y (torch.Tensor): Received signal tensor of shape [batch_size, num_rx, num_subcarriers].
-            num_tx (int): The number of transmitters.
-
-        Returns:
-            h_hat (torch.Tensor): Estimated channel matrix of shape [batch_size, num_rx, num_tx, num_subcarriers].
-        """
-        batch_size, num_rx, num_subcarriers = y.shape
-
-        # Check if the pilot tensor shape matches num_tx and num_subcarriers
-        assert self.pilots.shape == (
-            num_tx,
-            num_subcarriers,
-        ), f"Expected pilots of shape ({num_tx}, {num_subcarriers}), but got {self.pilots.shape}"
-
-        # Initialize the channel estimate tensor
-        h_hat = torch.zeros(
-            (batch_size, num_rx, num_tx, num_subcarriers), dtype=torch.complex64
-        )
-
-        # Perform LS estimation for each transmitter
-        for tx in range(num_tx):
-            # Get the pilot for this transmitter
-            pilot_tx = self.pilots[tx, :]  # Shape: [num_subcarriers]
-
-            # For each receiver, estimate the channel at each subcarrier
-            for rx in range(num_rx):
-                # LS estimation: h_hat = y / pilots (element-wise division)
-                h_hat[:, rx, tx, :] = y[:, rx, :] / pilot_tx
-
-        return h_hat
-
-
 class RemoveNulledSubcarriers:
     r"""RemoveNulledSubcarriers(resource_grid)
 
@@ -1449,7 +1396,7 @@ class NeuralPUSCHReceiver(nn.Module):
         rg = sys_parameters.transmitters[0]._resource_grid
         self._pilots = rg.pilot_pattern.pilots  # Extract pilots from resource grid
         self._num_mcss_supported = len(sys_parameters.mcs_index)
-        self._manual_channel_estimator = ManualChannelEstimator(self._pilots)
+
         for mcs_list_idx in range(self._num_mcss_supported):
             self._tb_encoders.append(
                 self._sys_parameters.transmitters[mcs_list_idx]._tb_encoder
@@ -1473,10 +1420,10 @@ class NeuralPUSCHReceiver(nn.Module):
             )
 
         # LS channel estimator
-        rg = sys_parameters.transmitters[0]._resource_grid
+        self.rg = sys_parameters.transmitters[0]._resource_grid
         pc = sys_parameters.pusch_configs[0][0]
         # Initialize the numpy-based LS channel estimator
-        self._ls_est_np = MyLSChannelEstimatorNP(rg, interpolation_type="nn")
+        self._ls_est_np = MyLSChannelEstimatorNP(self.rg, interpolation_type="nn")
         # self._ls_est = PUSCHLSChannelEstimator(
         #     resource_grid=rg,
         #     dmrs_length=pc.dmrs.length,
@@ -1540,7 +1487,8 @@ class NeuralPUSCHReceiver(nn.Module):
             )  # Handle `no` in case it's a tensor
 
             # Use the numpy-based LS estimator
-            h_hat_numpy, err_var_numpy = self._ls_est_np([y_numpy, no_numpy])
+            print(self.rg, self._pilots)
+            h_hat_numpy, err_var_numpy = self._ls_est_np()
             print("estimated channel")
             # Convert the results back to PyTorch tensors
             h_hat = torch.from_numpy(h_hat_numpy).to(y.device)
